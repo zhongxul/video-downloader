@@ -1,6 +1,7 @@
 ﻿package com.example.videodownloader.parser
 
 import android.util.Log
+import android.util.Base64
 import com.example.videodownloader.domain.model.ParsedVideoInfo
 import com.example.videodownloader.domain.model.VideoFormat
 import okhttp3.OkHttpClient
@@ -24,6 +25,8 @@ class WebParserGateway(
 
     override suspend fun parse(url: String): ParsedVideoInfo {
         Log.d(tag, "parse start: $url")
+
+        parseBlueGayHash(url)?.let { return it }
 
         parseDirectMedia(url)?.let { return it }
 
@@ -51,6 +54,56 @@ class WebParserGateway(
 
         Log.w(tag, "parse failed: no downloadable format, url=$url")
         throw IllegalArgumentException("未能解析到可下载视频，请更换链接后重试")
+    }
+
+    private fun parseBlueGayHash(url: String): ParsedVideoInfo? {
+        val lowerUrl = url.lowercase()
+        if (!lowerUrl.contains("kstore.vip/") || !lowerUrl.contains(".html#")) {
+            return null
+        }
+
+        val fragment = url.substringAfter('#', "").substringBefore('#').trim()
+        if (fragment.isBlank()) return null
+
+        val standardBase64 = fragment
+            .replace('-', '+')
+            .replace('_', '/')
+            .replace('.', '=')
+            .filter { it.isLetterOrDigit() || it == '+' || it == '/' || it == '=' }
+
+        val payloadText = runCatching {
+            val decoded = Base64.decode(standardBase64, Base64.DEFAULT)
+            String(decoded, Charsets.UTF_8)
+        }.getOrNull() ?: return null
+
+        val payload = runCatching { JSONObject(payloadText) }.getOrNull() ?: return null
+        val rawVideoUrl = payload.optString("url").trim()
+        if (rawVideoUrl.isBlank()) return null
+
+        val normalizedVideoUrl = normalizeVideoUrl(rawVideoUrl)
+        val cleanVideoUrl = normalizedVideoUrl.substringBefore('?').substringBefore('#')
+        if (!cleanVideoUrl.endsWith(".mp4", ignoreCase = true) &&
+            !cleanVideoUrl.endsWith(".m3u8", ignoreCase = true)
+        ) {
+            return null
+        }
+
+        val ext = if (cleanVideoUrl.endsWith(".m3u8", ignoreCase = true)) "m3u8" else "mp4"
+        val title = sanitizeTitle(payload.optString("title")).ifBlank { "web_video" }
+        return ParsedVideoInfo(
+            title = title,
+            coverUrl = null,
+            formats = listOf(
+                VideoFormat(
+                    formatId = "bluegay_hash",
+                    resolution = inferResolution(normalizedVideoUrl),
+                    ext = ext,
+                    sizeText = null,
+                    downloadUrl = normalizedVideoUrl,
+                    downloadable = true,
+                ),
+            ),
+        )
     }
 
     private fun parseDirectMedia(url: String): ParsedVideoInfo? {

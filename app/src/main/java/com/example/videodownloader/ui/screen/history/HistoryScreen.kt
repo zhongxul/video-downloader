@@ -19,6 +19,7 @@ import androidx.compose.material3.Checkbox
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SnackbarHost
@@ -356,9 +357,6 @@ private fun DownloadQueueSection(
                         val statusLine = buildString {
                             append("状态：")
                             append(task.status.toDisplayName())
-                            append(" · 进度 ")
-                            append(task.progress)
-                            append("%")
                             compactErrorMessage(task.errorMessage)?.let {
                                 append(" · ")
                                 append(it)
@@ -374,6 +372,15 @@ private fun DownloadQueueSection(
                             },
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis,
+                        )
+                        LinearProgressIndicator(
+                            progress = { task.progress.coerceIn(0, 100) / 100f },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text(
+                            text = "下载进度 ${task.progress.coerceIn(0, 100)}%",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
                         )
 
                         if (!manageMode) {

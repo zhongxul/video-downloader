@@ -1,6 +1,9 @@
 ﻿package com.example.videodownloader.ui.screen.history
 
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -70,8 +73,10 @@ fun CompletedScreen(
             Header(
                 manageMode = state.manageMode,
                 selectedCount = state.selectedIds.size,
+                allSelected = state.tasks.isNotEmpty() && state.tasks.all { state.selectedIds.contains(it.id) },
                 onBack = onBack,
                 onToggleManage = viewModel::toggleManageMode,
+                onToggleSelectAll = viewModel::toggleSelectAll,
                 onDelete = viewModel::deleteSelected,
                 onShare = {
                     val msg = MediaActionHelper.shareVideos(context, viewModel.selectedTasks())
@@ -99,6 +104,7 @@ fun CompletedScreen(
                             manageMode = state.manageMode,
                             selected = state.selectedIds.contains(task.id),
                             onToggleSelection = { viewModel.toggleSelection(task.id) },
+                            onLongPressSelection = { viewModel.enterManageModeWithSelection(task.id) },
                             onOpenDetail = { detailTask = task },
                             onPlay = {
                                 val error = MediaActionHelper.openVideo(context, task)
@@ -139,8 +145,10 @@ fun CompletedScreen(
 private fun Header(
     manageMode: Boolean,
     selectedCount: Int,
+    allSelected: Boolean,
     onBack: () -> Unit,
     onToggleManage: () -> Unit,
+    onToggleSelectAll: () -> Unit,
     onDelete: () -> Unit,
     onShare: () -> Unit,
 ) {
@@ -161,6 +169,7 @@ private fun Header(
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
                     Button(onClick = onDelete) { Text("删除") }
                     OutlinedButton(onClick = onShare) { Text("分享") }
+                    OutlinedButton(onClick = onToggleSelectAll) { Text(if (allSelected) "取消全选" else "全选") }
                     Text("已选 $selectedCount 项", style = MaterialTheme.typography.bodySmall)
                 }
             }
@@ -169,15 +178,28 @@ private fun Header(
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun CompletedVideoItem(
     task: DownloadTask,
     manageMode: Boolean,
     selected: Boolean,
     onToggleSelection: () -> Unit,
+    onLongPressSelection: () -> Unit,
     onOpenDetail: () -> Unit,
     onPlay: () -> Unit,
 ) {
-    AppSectionCard {
+    AppSectionCard(
+        modifier = Modifier.then(
+            if (manageMode) {
+                Modifier.clickable { onToggleSelection() }
+            } else {
+                Modifier.combinedClickable(
+                    onClick = {},
+                    onLongClick = onLongPressSelection,
+                )
+            },
+        ),
+    ) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,

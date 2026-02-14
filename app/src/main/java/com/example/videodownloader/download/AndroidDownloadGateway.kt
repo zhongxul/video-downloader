@@ -10,13 +10,21 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import okhttp3.ConnectionPool
+import okhttp3.Dispatcher as OkHttpDispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import javax.crypto.Cipher
+import javax.crypto.spec.IvParameterSpec
+import javax.crypto.spec.SecretKeySpec
+import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
@@ -26,6 +34,7 @@ import java.io.IOException
 import java.io.OutputStream
 import java.net.URI
 import java.net.SocketTimeoutException
+import kotlin.random.Random
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicLong
@@ -37,12 +46,21 @@ class AndroidDownloadGateway(
     private companion object {
         const val TAG = "AndroidDownloadGateway"
         const val M3U8_SEGMENT_MAX_RETRY = 3
-        const val M3U8_SEGMENT_RETRY_BASE_DELAY_MS = 1200L
+        const val M3U8_SEGMENT_RETRY_BASE_DELAY_MS = 400L
+        const val M3U8_SEGMENT_PARALLELISM = 10
+        const val M3U8_SEGMENT_IO_BUFFER_SIZE = 64 * 1024
+        const val M3U8_MAX_REQUESTS = 64
+        const val M3U8_MAX_REQUESTS_PER_HOST = 16
     }
 
     private val destinationFolder = "VideoDownloader"
     private val scannedDownloadIds = mutableSetOf<Long>()
     private val enqueuedPathById = mutableMapOf<Long, String>()
+
+    private val m3u8Dispatcher = OkHttpDispatcher().apply {
+        maxRequests = M3U8_MAX_REQUESTS
+        maxRequestsPerHost = M3U8_MAX_REQUESTS_PER_HOST
+    }
 
     private val preflightClient = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
@@ -54,6 +72,8 @@ class AndroidDownloadGateway(
     private val m3u8Client = OkHttpClient.Builder()
         .connectTimeout(20, TimeUnit.SECONDS)
         .readTimeout(20, TimeUnit.SECONDS)
+        .dispatcher(m3u8Dispatcher)
+        .connectionPool(ConnectionPool(M3U8_MAX_REQUESTS_PER_HOST, 5, TimeUnit.MINUTES))
         .followRedirects(true)
         .followSslRedirects(true)
         .build()
@@ -322,37 +342,28 @@ class AndroidDownloadGateway(
             targetFile.delete()
         }
 
-        val mediaPlaylistUrl = resolveMediaPlaylistUrl(sourceUrl)
-            ?: throw IllegalArgumentException("鏈幏鍙栧埌鏈夋晥 m3u8 鎾斁鍒楄〃")
-        val mediaPlaylistText = fetchText(mediaPlaylistUrl)
-            ?: throw IllegalArgumentException("m3u8 鎾斁鍒楄〃璇诲彇澶辫触")
-        if (mediaPlaylistText.contains("#EXT-X-KEY")) {
-            throw IllegalArgumentException("检测到加密 m3u8，当前不支持下载")
+        val playlistResult = resolveMediaPlaylist(sourceUrl)
+            ?: throw IllegalArgumentException("m3u8 playlist unavailable")
+        val mediaPlaylistUrl = playlistResult.url
+        val mediaPlaylistText = playlistResult.text
+        val segments = parseSegmentEntries(mediaPlaylistUrl, mediaPlaylistText)
+        if (segments.isEmpty()) {
+            throw IllegalArgumentException("m3u8 has no downloadable segments")
         }
+        val encryptionKeys = prepareEncryptionKeys(segments)
 
-        val segmentUrls = parseSegmentUrls(mediaPlaylistUrl, mediaPlaylistText)
-        if (segmentUrls.isEmpty()) {
-            throw IllegalArgumentException("m3u8 未找到可下载分片")
-        }
-
-        FileOutputStream(targetFile).buffered().use { output ->
-            val total = segmentUrls.size
-            segmentUrls.forEachIndexed { index, segmentUrl ->
-                currentCoroutineContext().ensureActive()
-                appendSegmentToOutput(segmentUrl, output)
-                val progress = (((index + 1).toDouble() / total.toDouble()) * 100.0).toInt().coerceIn(1, 100)
-                updateInternalTask(
-                    internalId = internalId,
-                    newState = DownloadProgressState.DOWNLOADING,
-                    progress = progress,
-                    saveUri = "file://$absolutePath",
-                    errorMessage = null,
-                )
-            }
+        FileOutputStream(targetFile).buffered(M3U8_SEGMENT_IO_BUFFER_SIZE).use { output ->
+            downloadSegmentsInOrder(
+                internalId = internalId,
+                absolutePath = absolutePath,
+                segments = segments,
+                encryptionKeys = encryptionKeys,
+                output = output,
+            )
         }
 
         if (!targetFile.exists() || targetFile.length() <= 0L) {
-            throw IllegalArgumentException("鍚堝苟鍚庣殑鏂囦欢涓虹┖")
+            throw IllegalArgumentException("downloaded file is empty")
         }
 
         val validation = validateDownloadedResult(
@@ -361,7 +372,7 @@ class AndroidDownloadGateway(
         )
         if (!validation.valid) {
             deleteFileQuietly(targetFile.absolutePath)
-            throw IllegalArgumentException(validation.message ?: "m3u8 涓嬭浇缁撴灉鏍￠獙澶辫触")
+            throw IllegalArgumentException(validation.message ?: "m3u8 download validation failed")
         }
 
         ensureMediaIndexed(internalId, targetFile.absolutePath)
@@ -374,16 +385,23 @@ class AndroidDownloadGateway(
         )
     }
 
-    private fun resolveMediaPlaylistUrl(sourceUrl: String): String? {
-        val text = fetchText(sourceUrl) ?: return null
-        if (!text.contains("#EXTM3U", ignoreCase = true)) return null
-        if (!text.contains("#EXT-X-STREAM-INF", ignoreCase = true)) {
-            return sourceUrl
+    private fun resolveMediaPlaylist(sourceUrl: String): PlaylistResolveResult? {
+        val sourceText = fetchText(sourceUrl) ?: return null
+        if (!sourceText.contains("#EXTM3U", ignoreCase = true)) return null
+        if (!sourceText.contains("#EXT-X-STREAM-INF", ignoreCase = true)) {
+            return PlaylistResolveResult(url = sourceUrl, text = sourceText)
         }
 
-        val variantUrls = parseVariantPlaylistUrls(sourceUrl, text)
-        if (variantUrls.isEmpty()) return sourceUrl
-        return variantUrls.maxByOrNull { it.bandwidth }?.url ?: variantUrls.first().url
+        val variantUrls = parseVariantPlaylistUrls(sourceUrl, sourceText)
+        if (variantUrls.isEmpty()) {
+            return PlaylistResolveResult(url = sourceUrl, text = sourceText)
+        }
+        val selectedUrl = variantUrls.maxByOrNull { it.bandwidth }?.url ?: variantUrls.first().url
+        if (selectedUrl == sourceUrl) {
+            return PlaylistResolveResult(url = sourceUrl, text = sourceText)
+        }
+        val selectedText = fetchText(selectedUrl) ?: return null
+        return PlaylistResolveResult(url = selectedUrl, text = selectedText)
     }
 
     private fun parseVariantPlaylistUrls(baseUrl: String, text: String): List<VariantPlaylist> {
@@ -411,16 +429,128 @@ class AndroidDownloadGateway(
         return result
     }
 
-    private fun parseSegmentUrls(baseUrl: String, text: String): List<String> {
-        val result = mutableListOf<String>()
-        text.lines().forEach { raw ->
+    private fun parseSegmentEntries(baseUrl: String, text: String): List<MediaSegment> {
+        val result = mutableListOf<MediaSegment>()
+        var mediaSequence = 0L
+        var currentEncryption: SegmentEncryption? = null
+
+        text.lineSequence().forEach { raw ->
             val line = raw.trim()
-            if (line.isBlank() || line.startsWith("#")) return@forEach
+            if (line.isBlank()) return@forEach
+
+            if (line.startsWith("#EXT-X-MEDIA-SEQUENCE", ignoreCase = true)) {
+                mediaSequence = line.substringAfter(':', "").trim().toLongOrNull() ?: 0L
+                return@forEach
+            }
+
+            if (line.startsWith("#EXT-X-KEY", ignoreCase = true)) {
+                currentEncryption = parseKeyDirective(baseUrl, line)
+                return@forEach
+            }
+
+            if (line.startsWith("#")) return@forEach
+
             resolveRelativeUrl(baseUrl, line)?.let { resolved ->
-                result += resolved
+                val sequence = mediaSequence + result.size.toLong()
+                result += MediaSegment(
+                    url = resolved,
+                    sequence = sequence,
+                    encryption = currentEncryption,
+                )
             }
         }
+
         return result
+    }
+
+    private fun parseKeyDirective(baseUrl: String, line: String): SegmentEncryption? {
+        val attributes = parseAttributeMap(line.substringAfter(':', ""))
+        val method = attributes["METHOD"]?.uppercase()?.trim().orEmpty()
+        if (method.isBlank() || method == "NONE") {
+            return null
+        }
+        if (method != "AES-128") {
+            throw IllegalArgumentException("unsupported m3u8 key method: $method")
+        }
+
+        val keyUri = attributes["URI"]
+            ?.trim()
+            ?.removePrefix("\"")
+            ?.removeSuffix("\"")
+            ?.takeIf { it.isNotBlank() }
+            ?: throw IllegalArgumentException("m3u8 key uri missing")
+
+        val resolvedKeyUrl = resolveRelativeUrl(baseUrl, keyUri)
+            ?: throw IllegalArgumentException("m3u8 key uri invalid")
+
+        return SegmentEncryption(
+            method = method,
+            keyUrl = resolvedKeyUrl,
+            iv = parseHexIv(attributes["IV"]),
+        )
+    }
+
+    private fun parseAttributeMap(raw: String): Map<String, String> {
+        val result = mutableMapOf<String, String>()
+        val regex = Regex("""([A-Za-z0-9-]+)=(".*?"|[^,]*)""")
+        regex.findAll(raw).forEach { match ->
+            val key = match.groupValues.getOrNull(1)?.trim()?.uppercase().orEmpty()
+            if (key.isBlank()) return@forEach
+            val value = match.groupValues.getOrNull(2)?.trim().orEmpty()
+            result[key] = value
+        }
+        return result
+    }
+
+    private fun parseHexIv(raw: String?): ByteArray? {
+        if (raw.isNullOrBlank()) return null
+
+        var normalized = raw.trim()
+            .removePrefix("\"")
+            .removeSuffix("\"")
+            .removePrefix("0x")
+            .removePrefix("0X")
+            .trim()
+        if (normalized.isBlank()) return null
+        if (normalized.length % 2 != 0) {
+            normalized = "0$normalized"
+        }
+
+        val bytes = ByteArray(normalized.length / 2)
+        for (index in bytes.indices) {
+            val pairIndex = index * 2
+            val high = Character.digit(normalized[pairIndex], 16)
+            val low = Character.digit(normalized[pairIndex + 1], 16)
+            if (high < 0 || low < 0) {
+                throw IllegalArgumentException("invalid m3u8 iv: $raw")
+            }
+            bytes[index] = ((high shl 4) or low).toByte()
+        }
+
+        if (bytes.size == 16) return bytes
+        if (bytes.size < 16) {
+            val padded = ByteArray(16)
+            val offset = 16 - bytes.size
+            System.arraycopy(bytes, 0, padded, offset, bytes.size)
+            return padded
+        }
+        return bytes.copyOfRange(bytes.size - 16, bytes.size)
+    }
+
+    private fun prepareEncryptionKeys(segments: List<MediaSegment>): Map<String, ByteArray> {
+        val keyUrls = segments.mapNotNull { it.encryption?.keyUrl }.distinct()
+        if (keyUrls.isEmpty()) return emptyMap()
+
+        val keys = mutableMapOf<String, ByteArray>()
+        keyUrls.forEach { keyUrl ->
+            val keyBytes = fetchBinary(keyUrl)
+                ?: throw IllegalArgumentException("m3u8 key download failed")
+            if (keyBytes.isEmpty()) {
+                throw IllegalArgumentException("m3u8 key is empty")
+            }
+            keys[keyUrl] = keyBytes
+        }
+        return keys
     }
 
     private fun resolveRelativeUrl(baseUrl: String, candidate: String): String? {
@@ -433,68 +563,191 @@ class AndroidDownloadGateway(
     }
 
     private fun fetchText(url: String): String? {
-        val requestBuilder = Request.Builder()
-            .url(url)
-            .header("Accept", "*/*")
-            .header(
-                "User-Agent",
-                "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
-            )
-            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-        buildHeaders(url).forEach { (k, v) -> requestBuilder.header(k, v) }
-
         return runCatching {
-            m3u8Client.newCall(requestBuilder.build()).execute().use { response ->
+            m3u8Client.newCall(newM3u8RequestBuilder(url).build()).execute().use { response ->
                 if (!response.isSuccessful) return@use null
                 response.body?.string()
             }
         }.getOrNull()
     }
 
-    private suspend fun appendSegmentToOutput(segmentUrl: String, output: OutputStream) {
-        var lastError: Throwable? = null
-        repeat(M3U8_SEGMENT_MAX_RETRY) { attempt ->
-            currentCoroutineContext().ensureActive()
-            val failure = runCatching {
-                val requestBuilder = Request.Builder()
-                    .url(segmentUrl)
-                    .header("Accept", "*/*")
-                    .header(
-                        "User-Agent",
-                        "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
-                    )
-                    .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
-                buildHeaders(segmentUrl).forEach { (k, v) -> requestBuilder.header(k, v) }
+    private fun fetchBinary(url: String): ByteArray? {
+        return runCatching {
+            m3u8Client.newCall(newM3u8RequestBuilder(url).build()).execute().use { response ->
+                if (!response.isSuccessful) return@use null
+                response.body?.bytes()
+            }
+        }.getOrNull()
+    }
 
-                m3u8Client.newCall(requestBuilder.build()).execute().use { response ->
+    private suspend fun downloadSegmentsInOrder(
+        internalId: Long,
+        absolutePath: String,
+        segments: List<MediaSegment>,
+        encryptionKeys: Map<String, ByteArray>,
+        output: OutputStream,
+    ) = coroutineScope {
+        val total = segments.size
+        val parallelism = M3U8_SEGMENT_PARALLELISM.coerceIn(1, total)
+        var nextSubmitIndex = 0
+        val inFlight = mutableMapOf<Int, kotlinx.coroutines.Deferred<ByteArray>>()
+
+        // 仅维持有限窗口的并发任务，避免一次性拉起全部分片导致内存暴涨。
+        fun submitMoreTasks() {
+            while (nextSubmitIndex < total && inFlight.size < parallelism) {
+                val segmentIndex = nextSubmitIndex
+                val segment = segments[segmentIndex]
+                inFlight[segmentIndex] = async(Dispatchers.IO) {
+                    downloadSegmentBytes(segment, encryptionKeys)
+                }
+                nextSubmitIndex++
+            }
+        }
+
+        submitMoreTasks()
+
+        for (expectedIndex in 0 until total) {
+            currentCoroutineContext().ensureActive()
+            val task = inFlight.remove(expectedIndex)
+                ?: throw IllegalStateException("m3u8 segment task missing: index=$expectedIndex")
+            val bytes = task.await()
+            output.write(bytes)
+            val progress = (((expectedIndex + 1).toDouble() / total.toDouble()) * 100.0).toInt().coerceIn(1, 100)
+            updateInternalTask(
+                internalId = internalId,
+                newState = DownloadProgressState.DOWNLOADING,
+                progress = progress,
+                saveUri = "file://$absolutePath",
+                errorMessage = null,
+            )
+            submitMoreTasks()
+        }
+    }
+
+    private suspend fun downloadSegmentBytes(
+        segment: MediaSegment,
+        encryptionKeys: Map<String, ByteArray>,
+    ): ByteArray {
+        var lastError: Throwable? = null
+        for (attempt in 0 until M3U8_SEGMENT_MAX_RETRY) {
+            currentCoroutineContext().ensureActive()
+            val result = runCatching {
+                m3u8Client.newCall(newM3u8RequestBuilder(segment.url).build()).execute().use { response ->
                     if (!response.isSuccessful) {
                         throw SegmentHttpException(response.code)
                     }
                     val input = response.body?.byteStream()
                         ?: throw IOException("segment body is empty")
-                    input.use { stream -> stream.copyTo(output) }
+                    input.use { stream -> readAllBytes(stream) }
                 }
-            }.exceptionOrNull()
+            }
+            val bytes = result.getOrNull()
+            if (bytes != null && bytes.isNotEmpty()) {
+                return decryptSegmentIfNeeded(bytes, segment, encryptionKeys)
+            }
 
-            if (failure == null) return
+            val failure = result.exceptionOrNull() ?: IOException("segment body is empty")
             lastError = failure
 
             val isLastTry = attempt >= M3U8_SEGMENT_MAX_RETRY - 1
-            if (!shouldRetrySegmentError(failure) || isLastTry) return@repeat
+            if (!shouldRetrySegmentError(failure) || isLastTry) break
 
-            val delayMs = M3U8_SEGMENT_RETRY_BASE_DELAY_MS * (attempt + 1)
+            val delayMs = calculateSegmentRetryDelayMs(attempt)
             Log.w(
                 TAG,
                 "segment retry " + (attempt + 1) + "/" + M3U8_SEGMENT_MAX_RETRY +
-                    ", url=" + segmentUrl + ", reason=" + failure.message,
+                    ", url=" + segment.url + ", reason=" + failure.message,
             )
             delay(delayMs)
         }
 
         throw IllegalStateException(
-            "m3u8 segment download failed after retries: " + segmentUrl,
+            "m3u8 segment download failed after retries: " + segment.url,
             lastError,
         )
+    }
+
+    private fun decryptSegmentIfNeeded(
+        bytes: ByteArray,
+        segment: MediaSegment,
+        encryptionKeys: Map<String, ByteArray>,
+    ): ByteArray {
+        val encryption = segment.encryption ?: return bytes
+        if (!encryption.method.equals("AES-128", ignoreCase = true)) {
+            throw SegmentDecryptException("unsupported segment encryption: ${encryption.method}")
+        }
+
+        val key = encryptionKeys[encryption.keyUrl]
+            ?: throw SegmentDecryptException("segment key missing")
+        val iv = encryption.iv ?: buildSequenceIv(segment.sequence)
+        return decryptAesCbc(bytes, key, iv)
+    }
+
+    private fun decryptAesCbc(
+        encrypted: ByteArray,
+        rawKey: ByteArray,
+        iv: ByteArray,
+    ): ByteArray {
+        val key = when (rawKey.size) {
+            16, 24, 32 -> rawKey
+            else -> throw SegmentDecryptException("invalid AES key length: ${rawKey.size}")
+        }
+        if (iv.size != 16) {
+            throw SegmentDecryptException("invalid AES iv length: ${iv.size}")
+        }
+
+        return runCatching {
+            val cipher = Cipher.getInstance("AES/CBC/PKCS5Padding")
+            val secretKeySpec = SecretKeySpec(key, "AES")
+            val ivSpec = IvParameterSpec(iv)
+            cipher.init(Cipher.DECRYPT_MODE, secretKeySpec, ivSpec)
+            cipher.doFinal(encrypted)
+        }.getOrElse { throwable ->
+            throw SegmentDecryptException("segment decrypt failed", throwable)
+        }
+    }
+
+    private fun buildSequenceIv(sequence: Long): ByteArray {
+        val iv = ByteArray(16)
+        var value = sequence
+        for (index in 15 downTo 8) {
+            iv[index] = (value and 0xFF).toByte()
+            value = value ushr 8
+        }
+        return iv
+    }
+
+    private fun newM3u8RequestBuilder(url: String): Request.Builder {
+        val requestBuilder = Request.Builder()
+            .url(url)
+            .header("Accept", "*/*")
+            .header("Accept-Encoding", "identity")
+            .header(
+                "User-Agent",
+                "Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36",
+            )
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
+        buildHeaders(url).forEach { (k, v) -> requestBuilder.header(k, v) }
+        return requestBuilder
+    }
+
+    private fun readAllBytes(input: InputStream): ByteArray {
+        val buffer = ByteArray(M3U8_SEGMENT_IO_BUFFER_SIZE)
+        val output = ByteArrayOutputStream()
+        while (true) {
+            val read = input.read(buffer)
+            if (read < 0) break
+            if (read == 0) continue
+            output.write(buffer, 0, read)
+        }
+        return output.toByteArray()
+    }
+
+    private fun calculateSegmentRetryDelayMs(attempt: Int): Long {
+        val expFactor = 1L shl attempt.coerceAtMost(4)
+        val baseDelay = M3U8_SEGMENT_RETRY_BASE_DELAY_MS * expFactor
+        val jitterUpperBound = (baseDelay / 4L).coerceAtLeast(1L)
+        return baseDelay + Random.nextLong(jitterUpperBound)
     }
 
     private fun shouldRetrySegmentError(throwable: Throwable): Boolean {
@@ -520,6 +773,11 @@ class AndroidDownloadGateway(
     }
 
     private class SegmentHttpException(val code: Int) : IOException("HTTP " + code)
+
+    private class SegmentDecryptException(
+        message: String,
+        cause: Throwable? = null,
+    ) : IllegalStateException(message, cause)
 
     private fun updateInternalTask(
         internalId: Long,
@@ -873,9 +1131,26 @@ class AndroidDownloadGateway(
         @Volatile var job: kotlinx.coroutines.Job?,
     )
 
+    private data class MediaSegment(
+        val url: String,
+        val sequence: Long,
+        val encryption: SegmentEncryption?,
+    )
+
+    private data class SegmentEncryption(
+        val method: String,
+        val keyUrl: String,
+        val iv: ByteArray?,
+    )
+
     private data class VariantPlaylist(
         val url: String,
         val bandwidth: Int,
+    )
+
+    private data class PlaylistResolveResult(
+        val url: String,
+        val text: String,
     )
 }
 

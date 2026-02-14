@@ -57,6 +57,26 @@ class CompletedViewModel(
         _uiState.update { it.copy(selectedIds = selected) }
     }
 
+    fun toggleSelectAll() {
+        _uiState.update { current ->
+            val allIds = current.tasks.map { it.id }.toSet()
+            val allSelected = allIds.isNotEmpty() && allIds.all { current.selectedIds.contains(it) }
+            current.copy(selectedIds = if (allSelected) emptySet() else allIds)
+        }
+    }
+
+    fun enterManageModeWithSelection(taskId: String) {
+        _uiState.update { current ->
+            if (current.manageMode) {
+                return@update current
+            }
+            current.copy(
+                manageMode = true,
+                selectedIds = setOf(taskId),
+            )
+        }
+    }
+
     fun selectedTasks(): List<DownloadTask> {
         val selectedIds = uiState.value.selectedIds
         return uiState.value.tasks.filter { selectedIds.contains(it.id) }
