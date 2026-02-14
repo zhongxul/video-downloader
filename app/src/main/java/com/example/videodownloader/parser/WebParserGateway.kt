@@ -4,6 +4,13 @@ import android.util.Log
 import android.util.Base64
 import com.example.videodownloader.domain.model.ParsedVideoInfo
 import com.example.videodownloader.domain.model.VideoFormat
+import kotlinx.coroutines.Deferred
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.cancel
+import kotlinx.coroutines.coroutineScope
+import kotlinx.coroutines.selects.select
+import kotlinx.coroutines.withTimeoutOrNull
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.json.JSONArray
@@ -23,6 +30,13 @@ class WebParserGateway(
         .followSslRedirects(true)
         .build()
 
+    private val xClient = OkHttpClient.Builder()
+        .connectTimeout(10, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .followRedirects(true)
+        .followSslRedirects(true)
+        .build()
+
     override suspend fun parse(url: String): ParsedVideoInfo {
         Log.d(tag, "parse start: $url")
 
@@ -38,11 +52,12 @@ class WebParserGateway(
         }
 
         if (isXHost(url)) {
-            parseXBroadcast(url)?.let { return it }
-            parseTwitterSyndication(url)?.let { return it }
-            parseTwitterFx(url)?.let { return it }
-            parseFromMeta(url)?.let { return it }
-            Log.w(tag, "parse failed for x url=$url")
+            val startAt = System.nanoTime()
+            parseXFast(url)?.let {
+                Log.i(tag, "parseXFast success, cost=${elapsedMs(startAt)}ms, url=$url")
+                return it
+            }
+            Log.w(tag, "parse failed for x, cost=${elapsedMs(startAt)}ms, url=$url")
             throw IllegalArgumentException("当前网络可能无法访问 X 资源，请稍后重试或更换网络")
         }
 
@@ -360,16 +375,135 @@ class WebParserGateway(
         )
     }
 
-    private fun parseTwitterFx(url: String): ParsedVideoInfo? {
-        val tweetId = extractTweetId(url) ?: return null
+    private suspend fun parseXFast(url: String): ParsedVideoInfo? {
+        val startAt = System.nanoTime()
+        extractBroadcastId(url)?.let {
+            val broadcastStart = System.nanoTime()
+            parseXBroadcast(url)?.let {
+                Log.i(tag, "parseXFast hit=broadcast, cost=${elapsedMs(broadcastStart)}ms")
+                return it
+            }
+            val metaStart = System.nanoTime()
+            parseFromMeta(url)?.let {
+                Log.i(tag, "parseXFast hit=broadcast_meta, cost=${elapsedMs(metaStart)}ms")
+                return it
+            }
+            Log.w(tag, "parseXFast broadcast empty, total=${elapsedMs(startAt)}ms")
+            return null
+        }
+
+        extractTweetId(url)?.let {
+            val statusStart = System.nanoTime()
+            parseXStatusFast(url)?.let {
+                Log.i(tag, "parseXFast hit=status_parallel, cost=${elapsedMs(statusStart)}ms")
+                return it
+            }
+            val metaStart = System.nanoTime()
+            parseFromMeta(url)?.let {
+                Log.i(tag, "parseXFast hit=status_meta, cost=${elapsedMs(metaStart)}ms")
+                return it
+            }
+            Log.w(tag, "parseXFast status empty, total=${elapsedMs(startAt)}ms")
+            return null
+        }
+
+        val syndicationStart = System.nanoTime()
+        parseTwitterSyndication(url)?.let {
+            Log.i(tag, "parseXFast hit=fallback_syndication, cost=${elapsedMs(syndicationStart)}ms")
+            return it
+        }
+        val fxStart = System.nanoTime()
+        parseTwitterFx(url)?.let {
+            Log.i(tag, "parseXFast hit=fallback_fx, cost=${elapsedMs(fxStart)}ms")
+            return it
+        }
+        val metaStart = System.nanoTime()
+        parseFromMeta(url)?.let {
+            Log.i(tag, "parseXFast hit=fallback_meta, cost=${elapsedMs(metaStart)}ms")
+            return it
+        }
+        Log.w(tag, "parseXFast no result, total=${elapsedMs(startAt)}ms")
+        return null
+    }
+
+    private suspend fun parseXStatusFast(url: String): ParsedVideoInfo? = coroutineScope {
+        val totalStart = System.nanoTime()
+        val result = withTimeoutOrNull(X_STATUS_TOTAL_TIMEOUT_MS) {
+            val attempts = listOf(
+                async(Dispatchers.IO) {
+                    val startAt = System.nanoTime()
+                    val parsed = parseTwitterSyndication(url)
+                    Log.d(
+                        tag,
+                        "parseXStatusFast branch=syndication hit=${parsed != null} cost=${elapsedMs(startAt)}ms",
+                    )
+                    parsed
+                },
+                async(Dispatchers.IO) {
+                    val startAt = System.nanoTime()
+                    val parsed = parseTwitterFx(url)
+                    Log.d(tag, "parseXStatusFast branch=fx hit=${parsed != null} cost=${elapsedMs(startAt)}ms")
+                    parsed
+                },
+            )
+            firstNonNull(attempts)
+        }
+        if (result == null) {
+            Log.w(tag, "parseXStatusFast timeout/empty, cost=${elapsedMs(totalStart)}ms, url=$url")
+        } else {
+            Log.i(tag, "parseXStatusFast success, cost=${elapsedMs(totalStart)}ms, url=$url")
+        }
+        result
+    }
+
+    private suspend fun parseTwitterFx(url: String): ParsedVideoInfo? = coroutineScope {
+        val tweetId = extractTweetId(url) ?: return@coroutineScope null
         val handle = extractTweetHandle(url)
         val path = if (handle.isNullOrBlank()) "i/status/$tweetId" else "$handle/status/$tweetId"
         val mirrors = listOf("fxtwitter.com", "vxtwitter.com", "fixupx.com")
-        mirrors.forEach { host ->
-            parseFromMeta("https://$host/$path")?.let { return it }
+
+        val totalStart = System.nanoTime()
+        val result = withTimeoutOrNull(X_FX_TOTAL_TIMEOUT_MS) {
+            val attempts = mirrors.map { host ->
+                async(Dispatchers.IO) {
+                    val startAt = System.nanoTime()
+                    val parsed = parseFromMeta("https://$host/$path")
+                    Log.d(tag, "parseTwitterFx mirror=$host hit=${parsed != null} cost=${elapsedMs(startAt)}ms")
+                    parsed
+                }
+            }
+            firstNonNull(attempts)
         }
-        Log.w(tag, "parseTwitterFx: all mirrors failed, tweetId=$tweetId")
-        return null
+        if (result == null) {
+            Log.w(tag, "parseTwitterFx empty/timeout, cost=${elapsedMs(totalStart)}ms, tweetId=$tweetId")
+        } else {
+            Log.i(tag, "parseTwitterFx success, cost=${elapsedMs(totalStart)}ms, tweetId=$tweetId")
+        }
+        result
+    }
+
+    private suspend fun <T> firstNonNull(attempts: List<Deferred<T?>>): T? {
+        val pending = attempts.toMutableList()
+        return try {
+            while (pending.isNotEmpty()) {
+                val (finished, value) = select<Pair<Deferred<T?>, T?>> {
+                    pending.forEach { deferred ->
+                        deferred.onAwait { result -> deferred to result }
+                    }
+                }
+                pending.remove(finished)
+                if (value != null) {
+                    return value
+                }
+            }
+            null
+        } finally {
+            attempts.forEach { deferred ->
+                if (deferred.isActive) {
+                    deferred.cancel()
+                }
+            }
+        }
     }
 
     private fun parseFromMeta(url: String): ParsedVideoInfo? {
@@ -764,6 +898,10 @@ class WebParserGateway(
         }
     }
 
+    private fun elapsedMs(startAtNano: Long): Long {
+        return ((System.nanoTime() - startAtNano) / 1_000_000L).coerceAtLeast(0L)
+    }
+
     private fun httpGet(url: String): String? = httpGetWithFinalUrl(url)?.body
 
     private fun httpGetWithFinalUrl(url: String): HttpResult? {
@@ -786,8 +924,10 @@ class WebParserGateway(
 
         val request = requestBuilder.build()
 
+        val callClient = if (isXHost(url)) xClient else client
+
         return runCatching {
-            client.newCall(request).execute().use { response ->
+            callClient.newCall(request).execute().use { response ->
                 if (!response.isSuccessful) {
                     Log.w(tag, "http failed code=${response.code}, url=$url")
                     return@use null
@@ -816,6 +956,8 @@ class WebParserGateway(
     )
 
     companion object {
+        private const val X_STATUS_TOTAL_TIMEOUT_MS = 12_000L
+        private const val X_FX_TOTAL_TIMEOUT_MS = 9_000L
         private val URL_PLAIN_REGEX = Regex("""https?://[^\s\"'<>\\]+""", RegexOption.IGNORE_CASE)
         private val URL_ESCAPED_REGEX = Regex("""https?:\\\\/\\\\/[^\s\"'<>]+""", RegexOption.IGNORE_CASE)
         private val RELATIVE_PLAY_REGEX = Regex("""/aweme/v1/(?:play|playwm)/\?[^\s\"'<>]+""", RegexOption.IGNORE_CASE)

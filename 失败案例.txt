@@ -1,0 +1,15 @@
+02-14 22:36:19.341 18133 24558 D WebParserGateway: parse start: https://x.com/i/status/1963974880275399002
+02-14 22:36:19.657 18133 24559 W WebParserGateway: parseFromMeta: no og video, url=https://vxtwitter.com/i/status/1963974880275399002
+02-14 22:36:19.657 18133 24559 D WebParserGateway: parseTwitterFx mirror=vxtwitter.com hit=false cost=309ms
+02-14 22:36:19.910 18133 24561 W WebParserGateway: parseTwitterSyndication: no variants, tweetId=1963974880275399002
+02-14 22:36:19.910 18133 24561 D WebParserGateway: parseXStatusFast branch=syndication hit=false cost=564ms
+02-14 22:36:20.682 18133 24558 W WebParserGateway: parseFromMeta: no og video, url=https://fxtwitter.com/i/status/1963974880275399002
+02-14 22:36:20.682 18133 24558 D WebParserGateway: parseTwitterFx mirror=fxtwitter.com hit=false cost=1334ms
+02-14 22:36:20.703 18133 24580 W WebParserGateway: parseFromMeta: no og video, url=https://fixupx.com/i/status/1963974880275399002
+02-14 22:36:20.703 18133 24580 D WebParserGateway: parseTwitterFx mirror=fixupx.com hit=false cost=1355ms
+02-14 22:36:20.704 18133 24580 W WebParserGateway: parseTwitterFx empty/timeout, cost=1357ms, tweetId=1963974880275399002
+02-14 22:36:20.704 18133 24580 D WebParserGateway: parseXStatusFast branch=fx hit=false cost=1358ms
+02-14 22:36:20.705 18133 24580 W WebParserGateway: parseXStatusFast timeout/empty, cost=1362ms, url=https://x.com/i/status/1963974880275399002
+02-14 22:36:21.089 18133 24580 W WebParserGateway: parseFromMeta: no og video, url=https://x.com/i/status/1963974880275399002
+02-14 22:36:21.089 18133 24580 W WebParserGateway: parseXFast status empty, total=1747ms
+02-14 22:36:21.090 18133 24580 W WebParserGateway: parse failed for x, cost=1748ms, url=https://x.com/i/status/1963974880275399002
