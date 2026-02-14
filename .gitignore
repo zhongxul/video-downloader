@@ -1,0 +1,23 @@
+# Gradle
+.gradle/
+**/build/
+
+# Android/IDE
+.idea/
+*.iml
+local.properties
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Keystore
+*.jks
+*.keystore
+
+# Temporary files
+*.tmp
+*.swp
