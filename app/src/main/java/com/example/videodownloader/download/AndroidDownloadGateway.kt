@@ -6,6 +6,9 @@ import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Environment
 import android.util.Log
+import com.example.videodownloader.core.io.resolveFilePathFromUriString
+import com.example.videodownloader.core.net.buildXMediaHeaderMap
+import com.example.videodownloader.core.text.AppText
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -41,6 +44,7 @@ import java.util.concurrent.atomic.AtomicLong
 
 class AndroidDownloadGateway(
     private val context: Context,
+    private val appText: AppText,
     private val xCookieProvider: (() -> String?)? = null,
 ) : DownloadGateway {
     private companion object {
@@ -147,7 +151,7 @@ class AndroidDownloadGateway(
                         state = DownloadProgressState.FAILED,
                         progress = null,
                         saveUri = null,
-                        errorMessage = "涓嬭浇浠诲姟涓嶅瓨鍦ㄦ垨宸茶绯荤粺娓呯悊",
+                        errorMessage = appText.downloadTaskMissingOrCleaned(),
                     )
                 }
 
@@ -186,8 +190,13 @@ class AndroidDownloadGateway(
                     )
 
                     DownloadManager.STATUS_SUCCESSFUL -> {
-                        val resolvedPath = resolvePathFromLocalUri(localUri)
-                            ?: synchronized(enqueuedPathById) { enqueuedPathById[externalId] }
+                        val rememberedPath = synchronized(enqueuedPathById) { enqueuedPathById[externalId] }
+                        val resolvedPath = when {
+                            !rememberedPath.isNullOrBlank() -> rememberedPath
+                            localUri.isNullOrBlank() -> null
+                            localUri.startsWith("content://", ignoreCase = true) -> null
+                            else -> resolvePathFromLocalUri(localUri)
+                        }
                         val validation = validateDownloadedResult(localUri, resolvedPath)
                         if (!validation.valid) {
                             deleteInvalidResult(localUri, resolvedPath)
@@ -226,7 +235,7 @@ class AndroidDownloadGateway(
                         state = DownloadProgressState.FAILED,
                         progress = progress,
                         saveUri = localUri,
-                        errorMessage = "下载状态未知",
+                        errorMessage = appText.downloadStatusUnknown(),
                     )
                 }
             }
@@ -241,7 +250,7 @@ class AndroidDownloadGateway(
                 it.state = DownloadProgressState.FAILED
                 it.progress = it.progress ?: 0
                 it.saveUri = null
-                it.errorMessage = "下载已取消"
+                it.errorMessage = appText.downloadCanceledByUser()
                 it.job = null
             }
             return@withContext Unit
@@ -294,7 +303,7 @@ class AndroidDownloadGateway(
                     newState = DownloadProgressState.FAILED,
                     progress = state.progress ?: 0,
                     saveUri = null,
-                    errorMessage = throwable.message ?: "m3u8 涓嬭浇澶辫触",
+                    errorMessage = throwable.message ?: appText.m3u8DownloadFailed(),
                 )
             }
         }
@@ -312,7 +321,7 @@ class AndroidDownloadGateway(
                 state = DownloadProgressState.FAILED,
                 progress = null,
                 saveUri = null,
-                errorMessage = "涓嬭浇浠诲姟涓嶅瓨鍦ㄦ垨宸茶娓呯悊",
+                errorMessage = appText.downloadTaskMissingOrCleared(),
             )
 
         return DownloadProgressSnapshot(
@@ -845,31 +854,41 @@ class AndroidDownloadGateway(
             "Accept-Language" to "zh-CN,zh;q=0.9,en;q=0.8",
         )
 
-        if (url.contains("douyin.com", true) || url.contains("iesdouyin.com", true)) {
+        if (isDouyinRelatedUrl(url)) {
             headers += "Referer" to "https://www.douyin.com/"
         }
-        if (url.contains("x.com", true) || url.contains("twitter.com", true)) {
-            headers += "Referer" to "https://x.com/"
-            xCookieProvider?.invoke()
-                ?.takeIf { it.isNotBlank() }
-                ?.let { cookie -> headers += "Cookie" to cookie }
+        buildXMediaHeaderMap(url, xCookieProvider?.invoke()).forEach { (key, value) ->
+            headers += key to value
         }
 
         return headers
     }
 
+    private fun isDouyinRelatedUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("douyin.com") ||
+            lower.contains("iesdouyin.com") ||
+            lower.contains("douyinpic.com") ||
+            lower.contains("douyinstatic.com") ||
+            lower.contains("snssdk.com") ||
+            lower.contains("amemv.com") ||
+            lower.contains("ibytedtos.com") ||
+            lower.contains("byteimg.com") ||
+            lower.contains("tos-cn-")
+    }
+
     private fun mapFailureReason(reason: Int): String {
         return when (reason) {
-            DownloadManager.ERROR_CANNOT_RESUME -> "涓嬭浇鏃犳硶鎭㈠"
-            DownloadManager.ERROR_DEVICE_NOT_FOUND -> "未找到存储设备"
-            DownloadManager.ERROR_FILE_ALREADY_EXISTS -> "目标文件已存在"
-            DownloadManager.ERROR_FILE_ERROR -> "鏂囦欢璇诲啓澶辫触"
-            DownloadManager.ERROR_HTTP_DATA_ERROR -> "缃戠粶鏁版嵁閿欒"
-            DownloadManager.ERROR_INSUFFICIENT_SPACE -> "瀛樺偍绌洪棿涓嶈冻"
-            DownloadManager.ERROR_TOO_MANY_REDIRECTS -> "重定向过多"
-            DownloadManager.ERROR_UNHANDLED_HTTP_CODE -> "鏈嶅姟鍣ㄨ繑鍥炲紓甯哥姸鎬佺爜"
-            DownloadManager.ERROR_UNKNOWN -> "鏈煡閿欒"
-            else -> "涓嬭浇澶辫触"
+            DownloadManager.ERROR_CANNOT_RESUME -> appText.downloadCannotResume(reason)
+            DownloadManager.ERROR_DEVICE_NOT_FOUND -> appText.storageDeviceNotFound()
+            DownloadManager.ERROR_FILE_ALREADY_EXISTS -> appText.targetFileAlreadyExists()
+            DownloadManager.ERROR_FILE_ERROR -> appText.fileReadWriteFailed(reason)
+            DownloadManager.ERROR_HTTP_DATA_ERROR -> appText.networkDataError(reason)
+            DownloadManager.ERROR_INSUFFICIENT_SPACE -> appText.insufficientStorage()
+            DownloadManager.ERROR_TOO_MANY_REDIRECTS -> appText.tooManyRedirects()
+            DownloadManager.ERROR_UNHANDLED_HTTP_CODE -> appText.serverStatusError(reason)
+            DownloadManager.ERROR_UNKNOWN -> appText.unknownDownloadError(reason)
+            else -> appText.genericDownloadFailed(reason)
         }
     }
 
@@ -878,17 +897,18 @@ class AndroidDownloadGateway(
         return when {
             lower.endsWith(".mp4") -> "video/mp4"
             lower.endsWith(".m3u8") -> "application/vnd.apple.mpegurl"
+            lower.endsWith(".jpg") || lower.endsWith(".jpeg") -> "image/jpeg"
+            lower.endsWith(".png") -> "image/png"
+            lower.endsWith(".webp") -> "image/webp"
+            lower.endsWith(".gif") -> "image/gif"
+            lower.endsWith(".bmp") -> "image/bmp"
+            lower.endsWith(".heic") -> "image/heic"
             else -> "video/*"
         }
     }
 
     private fun resolvePathFromLocalUri(localUri: String?): String? {
-        if (localUri.isNullOrBlank()) return null
-        return if (localUri.startsWith("file://", ignoreCase = true)) {
-            Uri.parse(localUri).path
-        } else {
-            null
-        }
+        return resolveFilePathFromUriString(localUri)
     }
 
     private fun ensureMediaIndexed(externalId: Long, absolutePath: String) {
@@ -924,13 +944,13 @@ class AndroidDownloadGateway(
             if (!file.exists()) {
                 return FileValidationResult(
                     valid = false,
-                    message = "涓嬭浇鏂囦欢涓嶅瓨鍦紝宸叉寜澶辫触澶勭悊",
+                    message = appText.downloadedFileMissing(),
                 )
             }
             if (file.length() <= 0L) {
                 return FileValidationResult(
                     valid = false,
-                    message = "涓嬭浇鏂囦欢涓虹┖锛屽凡鑷姩鍒犻櫎",
+                    message = appText.downloadedFileEmpty(),
                 )
             }
         }
@@ -949,7 +969,7 @@ class AndroidDownloadGateway(
         ) {
             return FileValidationResult(
                 valid = false,
-                message = "下载结果仍是 m3u8 播放列表，已按失败处理并删除文件",
+                message = appText.downloadedPlaylistNotMerged(),
             )
         }
 
@@ -961,7 +981,7 @@ class AndroidDownloadGateway(
         ) {
             return FileValidationResult(
                 valid = false,
-                message = "下载结果不是视频文件（网页或接口错误内容），已按失败处理并删除文件",
+                message = appText.downloadedHtmlInsteadOfVideo(),
             )
         }
 
@@ -969,7 +989,7 @@ class AndroidDownloadGateway(
         if (!looksLikeVideoContainer(header) && isMostlyText(header)) {
             return FileValidationResult(
                 valid = false,
-                message = "下载文件格式异常，疑似不可播放，已按失败处理并删除文件",
+                message = appText.downloadedVideoInvalid(),
             )
         }
 
@@ -1061,6 +1081,11 @@ class AndroidDownloadGateway(
     }
 
     private fun validateBeforeEnqueue(url: String): String? {
+        // 图片链接不做视频型预检，避免部分 CDN 对 Range 请求返回异常导致误判失败。
+        if (isLikelyImageUrl(url)) {
+            return null
+        }
+
         val requestBuilder = Request.Builder()
             .url(url)
             .get()
@@ -1079,7 +1104,7 @@ class AndroidDownloadGateway(
 
         response.use { res ->
             if (!res.isSuccessful) {
-                return "下载预检请求失败，HTTP ${res.code}"
+                return appText.downloadPreflightHttpFailed(res.code)
             }
 
             val contentType = res.header("Content-Type").orEmpty().lowercase()
@@ -1089,7 +1114,7 @@ class AndroidDownloadGateway(
                 contentType.contains("text/html") ||
                 contentType.contains("application/json")
             ) {
-                return "该链接返回非视频内容类型：${contentType}"
+                return appText.downloadNonVideoContentType(contentType)
             }
 
             val header = res.body?.byteStream()?.use { input -> readBytes(input, 512) } ?: ByteArray(0)
@@ -1106,12 +1131,26 @@ class AndroidDownloadGateway(
                     textHeader.startsWith("{\"errors\"") ||
                     textHeader.startsWith("{\"error\"")
                 ) {
-                    return "璇ヤ笅杞介€夐」杩斿洖鐨勪笉鏄彲鐩存帴鎾斁鐨勮棰戯紝璇锋洿鎹㈠叾浠栭€夐」"
+                    return appText.downloadOptionNotPlayable()
                 }
             }
         }
 
         return null
+    }
+
+    private fun isLikelyImageUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("sc=image") ||
+            lower.contains("biz_tag=aweme_images") ||
+            lower.contains("douyinpic.com") ||
+            lower.endsWith(".jpg") ||
+            lower.endsWith(".jpeg") ||
+            lower.endsWith(".png") ||
+            lower.endsWith(".webp") ||
+            lower.endsWith(".gif") ||
+            lower.endsWith(".bmp") ||
+            lower.endsWith(".heic")
     }
 
     private fun deleteFileQuietly(path: String?) {

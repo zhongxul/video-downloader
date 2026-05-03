@@ -1,5 +1,7 @@
 ﻿package com.example.videodownloader.domain.usecase
 
+import com.example.videodownloader.core.text.AppText
+import com.example.videodownloader.core.text.DefaultAppText
 import com.example.videodownloader.data.repository.DownloadTaskRepository
 import com.example.videodownloader.domain.model.DownloadTaskStatus
 import com.example.videodownloader.download.DownloadGateway
@@ -7,10 +9,15 @@ import com.example.videodownloader.download.DownloadGateway
 class ResumeDownloadTaskUseCase(
     private val repository: DownloadTaskRepository,
     private val downloadGateway: DownloadGateway,
+    private val appText: AppText = DefaultAppText,
 ) {
     suspend operator fun invoke(taskId: String) {
-        val task = requireNotNull(repository.getTask(taskId)) { "任务不存在" }
-        val fileName = buildFileName(task.title, task.selectedExt)
+        val task = requireNotNull(repository.getTask(taskId)) { appText.taskNotFound() }
+        val fileName = buildOutputFileName(
+            title = task.title,
+            ext = task.selectedExt,
+            isImage = isImageExt(task.selectedExt),
+        )
         val startResult = downloadGateway.startDownload(task.downloadUrl, fileName)
         val resolvedTitle = resolveTaskTitle(task.title, startResult.fileName)
         repository.updateTask(
@@ -23,12 +30,6 @@ class ResumeDownloadTaskUseCase(
                 updatedAt = System.currentTimeMillis(),
             ),
         )
-    }
-
-    private fun buildFileName(title: String, ext: String): String {
-        val safeTitle = title.replace(Regex("[\\\\/:*?\"<>|]"), "_").trim().ifBlank { "video" }
-        val safeExt = ext.trim().lowercase().trimStart('.').ifBlank { "mp4" }
-        return "$safeTitle.$safeExt"
     }
 
     private fun resolveTaskTitle(originalTitle: String, fileName: String?): String {

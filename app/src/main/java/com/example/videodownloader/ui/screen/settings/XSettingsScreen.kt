@@ -24,11 +24,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import com.example.videodownloader.R
 import com.example.videodownloader.ui.component.AppGradientBackdrop
 import com.example.videodownloader.ui.component.AppSectionCard
 
@@ -71,20 +73,20 @@ fun XSettingsScreen(
             AppSectionCard {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onBack) { Text("返回") }
+                        OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_back)) }
                     }
                     Text(
-                        text = "X Cookie 设置",
+                        text = stringResource(R.string.settings_title),
                         style = MaterialTheme.typography.headlineSmall,
                         fontWeight = FontWeight.Bold,
                     )
                     Text(
-                        text = "可手动粘贴 Cookie，也可通过内置网页登录后一键读取。",
+                        text = stringResource(R.string.settings_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     FilledTonalButton(onClick = onOpenLoginWebView) {
-                        Text("打开网页登录并自动获取")
+                        Text(stringResource(R.string.settings_open_login))
                     }
                 }
             }
@@ -94,21 +96,21 @@ fun XSettingsScreen(
                     OutlinedTextField(
                         value = state.cookieInput,
                         onValueChange = viewModel::onCookieChanged,
-                        label = { Text("Cookie") },
-                        placeholder = { Text("例如 auth_token=...; ct0=...") },
+                        label = { Text(stringResource(R.string.settings_cookie_label)) },
+                        placeholder = { Text(stringResource(R.string.settings_cookie_placeholder)) },
                         modifier = Modifier.fillMaxWidth(),
                         minLines = 5,
                         maxLines = 12,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         OutlinedButton(onClick = { viewModel.onCookieChanged(readClipboardText(context)) }) {
-                            Text("粘贴")
+                            Text(stringResource(R.string.settings_paste))
                         }
                         Button(onClick = viewModel::saveCookie) {
-                            Text("保存")
+                            Text(stringResource(R.string.settings_save))
                         }
                         OutlinedButton(onClick = viewModel::clearCookie) {
-                            Text("清空")
+                            Text(stringResource(R.string.settings_clear))
                         }
                     }
                 }

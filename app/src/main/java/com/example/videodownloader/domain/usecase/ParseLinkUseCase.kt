@@ -2,6 +2,8 @@
 
 import android.util.Log
 import android.util.Patterns
+import com.example.videodownloader.core.text.AppText
+import com.example.videodownloader.core.text.DefaultAppText
 import com.example.videodownloader.domain.model.ParsedVideoInfo
 import com.example.videodownloader.parser.ParserGateway
 import kotlinx.coroutines.Dispatchers
@@ -9,6 +11,7 @@ import kotlinx.coroutines.withContext
 
 class ParseLinkUseCase(
     private val parserGateway: ParserGateway,
+    private val appText: AppText = DefaultAppText,
 ) {
     private val tag = "ParseLinkUseCase"
 
@@ -20,11 +23,11 @@ class ParseLinkUseCase(
 
     fun resolveUrl(rawInput: String): String {
         val text = rawInput.trim()
-        require(text.isNotBlank()) { "请输入链接或包含链接的文案" }
+        require(text.isNotBlank()) { appText.inputRequired() }
 
         val extracted = extractUrl(text) ?: text
         val cleaned = cleanCandidate(extracted)
-        require(Patterns.WEB_URL.matcher(cleaned).matches()) { "未识别到有效链接，请检查后重试" }
+        require(Patterns.WEB_URL.matcher(cleaned).matches()) { appText.invalidLink() }
         return cleaned
     }
 

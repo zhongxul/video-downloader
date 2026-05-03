@@ -1,11 +1,14 @@
 ﻿package com.example.videodownloader.parser
 
+import com.example.videodownloader.core.text.AppText
+import com.example.videodownloader.core.text.DefaultAppText
 import com.example.videodownloader.domain.model.ParsedVideoInfo
 import timber.log.Timber
 
 class HybridParserGateway(
     private val webParser: WebParserGateway,
     private val ytDlpParser: YtDlpParserGateway,
+    private val appText: AppText = DefaultAppText,
 ) : ParserGateway {
     override suspend fun parse(url: String): ParsedVideoInfo {
         val webResult = runCatching { webParser.parse(url) }
@@ -26,6 +29,6 @@ class HybridParserGateway(
             throw ytError
         }
 
-        throw webResult.exceptionOrNull() ?: IllegalArgumentException("未能解析到可下载视频")
+        throw webResult.exceptionOrNull() ?: IllegalArgumentException(appText.parseNoDownloadableVideo())
     }
 }

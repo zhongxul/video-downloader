@@ -21,6 +21,13 @@ Thumbs.db
 # Temporary files
 *.tmp
 *.swp
+tmp_*.png
+*.db
+*.db-shm
+*.db-wal
+
+# Local agent/tool settings
+.claude/
 
 # Git worktrees
 .worktrees/

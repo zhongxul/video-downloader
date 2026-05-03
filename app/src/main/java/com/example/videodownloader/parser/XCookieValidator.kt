@@ -1,5 +1,7 @@
 package com.example.videodownloader.parser
 
+import com.example.videodownloader.core.text.AppText
+import com.example.videodownloader.core.text.DefaultAppText
 import com.example.videodownloader.data.local.XCookieStore
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -15,6 +17,7 @@ data class XCookieValidationResult(
 
 class XCookieValidator(
     private val xCookieStore: XCookieStore,
+    private val appText: AppText = DefaultAppText,
 ) {
     private val client = OkHttpClient.Builder()
         .connectTimeout(12, TimeUnit.SECONDS)
@@ -29,7 +32,7 @@ class XCookieValidator(
             return@withContext XCookieValidationResult(
                 valid = false,
                 shouldBlock = true,
-                message = "请先在“X 登录设置”中获取并保存 Cookie",
+                message = appText.xCookieRequired(),
             )
         }
 
@@ -39,7 +42,7 @@ class XCookieValidator(
             return@withContext XCookieValidationResult(
                 valid = false,
                 shouldBlock = true,
-                message = "当前 Cookie 缺少 auth_token 或 ct0，请重新获取",
+                message = appText.xCookieMissingFields(),
             )
         }
 
@@ -66,7 +69,7 @@ class XCookieValidator(
                     XCookieValidationResult(
                         valid = false,
                         shouldBlock = true,
-                        message = "X Cookie 可能已失效，请在“X 登录设置”重新获取",
+                        message = appText.xCookieExpired(),
                     )
                 } else {
                     XCookieValidationResult(
@@ -80,7 +83,7 @@ class XCookieValidator(
             XCookieValidationResult(
                 valid = false,
                 shouldBlock = false,
-                message = "当前网络无法校验 Cookie，已继续尝试解析",
+                message = appText.xCookieValidationSkipped(),
             )
         }
     }
@@ -101,4 +104,3 @@ class XCookieValidator(
             .firstOrNull()
     }
 }
-

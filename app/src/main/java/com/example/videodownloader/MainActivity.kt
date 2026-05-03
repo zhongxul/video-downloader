@@ -3,7 +3,7 @@ package com.example.videodownloader
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
-import com.example.videodownloader.ui.AppNavHost
+import com.example.videodownloader.ui.redesign.navigation.RedesignNavHost
 import com.example.videodownloader.ui.theme.VideoDownloaderTheme
 
 class MainActivity : ComponentActivity() {
@@ -12,7 +12,7 @@ class MainActivity : ComponentActivity() {
         val app = application as VideoDownloaderApp
         setContent {
             VideoDownloaderTheme {
-                AppNavHost(container = app.container)
+                RedesignNavHost(container = app.container)
             }
         }
     }

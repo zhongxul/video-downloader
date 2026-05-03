@@ -2,6 +2,7 @@
 
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
+import com.example.videodownloader.R
 import com.example.videodownloader.di.AppContainer
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -16,6 +17,7 @@ data class XSettingsUiState(
 class XSettingsViewModel(
     private val container: AppContainer,
 ) : ViewModel() {
+    private val appContext = container.appContext
     private val _uiState = MutableStateFlow(
         XSettingsUiState(cookieInput = container.xCookieStore.getCookie().orEmpty()),
     )
@@ -37,9 +39,9 @@ class XSettingsViewModel(
             it.copy(
                 cookieInput = normalized,
                 actionMessage = when {
-                    normalized.isBlank() -> "Cookie 已清空"
-                    authToken.isNullOrBlank() || ct0.isNullOrBlank() -> "Cookie 已保存，但缺少 auth_token 或 ct0"
-                    else -> "Cookie 已保存"
+                    normalized.isBlank() -> appContext.getString(R.string.settings_cookie_cleared)
+                    authToken.isNullOrBlank() || ct0.isNullOrBlank() -> appContext.getString(R.string.settings_cookie_saved_missing_fields)
+                    else -> appContext.getString(R.string.settings_cookie_saved)
                 },
             )
         }
@@ -51,9 +53,9 @@ class XSettingsViewModel(
             it.copy(
                 cookieInput = normalized,
                 actionMessage = if (normalized.isBlank()) {
-                    "未读取到有效 Cookie，请确认已登录 X"
+                    appContext.getString(R.string.settings_cookie_not_found_from_web)
                 } else {
-                    "已从登录页面读取并保存 Cookie"
+                    appContext.getString(R.string.settings_cookie_imported_from_web)
                 },
             )
         }
@@ -61,7 +63,7 @@ class XSettingsViewModel(
 
     fun clearCookie() {
         container.xCookieStore.clearCookie()
-        _uiState.update { it.copy(cookieInput = "", actionMessage = "Cookie 已清空") }
+        _uiState.update { it.copy(cookieInput = "", actionMessage = appContext.getString(R.string.settings_cookie_cleared)) }
     }
 
     fun clearMessage() {

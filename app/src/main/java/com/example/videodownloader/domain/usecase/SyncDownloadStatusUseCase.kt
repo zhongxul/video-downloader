@@ -1,5 +1,7 @@
 ﻿package com.example.videodownloader.domain.usecase
 
+import com.example.videodownloader.core.text.AppText
+import com.example.videodownloader.core.text.DefaultAppText
 import com.example.videodownloader.data.repository.DownloadTaskRepository
 import com.example.videodownloader.data.repository.ParseRecordRepository
 import com.example.videodownloader.domain.model.DownloadTask
@@ -14,6 +16,7 @@ class SyncDownloadStatusUseCase(
     private val repository: DownloadTaskRepository,
     private val parseRecordRepository: ParseRecordRepository,
     private val downloadGateway: DownloadGateway,
+    private val appText: AppText = DefaultAppText,
 ) {
     suspend operator fun invoke() {
         val activeTasks = repository.getActiveTasks()
@@ -30,7 +33,7 @@ class SyncDownloadStatusUseCase(
                 status = DownloadTaskStatus.FAILED,
                 progress = task.progress,
                 saveUri = task.saveUri,
-                errorMessage = "下载任务缺少系统下载 ID",
+                errorMessage = appText.missingSystemDownloadId(),
                 now = now,
             )
             return
@@ -108,11 +111,11 @@ class SyncDownloadStatusUseCase(
             record.copy(
                 status = status.toParseRecordStatus(),
                 message = when (status) {
-                    DownloadTaskStatus.SUCCESS -> "下载成功"
-                    DownloadTaskStatus.FAILED -> errorMessage ?: "下载失败"
-                    DownloadTaskStatus.CANCELED -> "下载已取消"
-                    DownloadTaskStatus.QUEUED -> "任务排队中"
-                    DownloadTaskStatus.DOWNLOADING -> "下载中"
+                    DownloadTaskStatus.SUCCESS -> appText.downloadSuccess()
+                    DownloadTaskStatus.FAILED -> errorMessage ?: appText.downloadFailed()
+                    DownloadTaskStatus.CANCELED -> appText.downloadCanceled()
+                    DownloadTaskStatus.QUEUED -> appText.taskQueued()
+                    DownloadTaskStatus.DOWNLOADING -> appText.downloading()
                 },
                 updatedAt = now,
             ),
@@ -128,27 +131,35 @@ class SyncDownloadStatusUseCase(
 
         val file = File(absolutePath)
         if (!file.exists()) {
-            return "下载文件不存在，已按失败处理"
+            return appText.downloadedFileMissing()
         }
         if (file.length() <= 0L) {
             file.delete()
-            return "下载文件为空，已自动删除"
+            return appText.downloadedFileEmpty()
         }
 
         val header = readFileHeader(file, 512)
         val headerText = header.toString(Charsets.UTF_8).trimStart()
         if (headerText.startsWith("#EXTM3U", ignoreCase = true)) {
             file.delete()
-            return "下载结果仍是 m3u8 播放清单，未成功合并为视频文件，已按失败处理并删除文件"
+            return appText.downloadedPlaylistNotMerged()
         }
         if (headerText.startsWith("<!doctype html", ignoreCase = true) || headerText.startsWith("<html", ignoreCase = true)) {
             file.delete()
-            return "下载结果不是视频文件（网页内容），已按失败处理并删除文件"
+            return appText.downloadedHtmlInsteadOfVideo()
+        }
+
+        if (isImageExt(expectedExt)) {
+            if (!looksLikeImageContainer(header, expectedExt)) {
+                file.delete()
+                return appText.downloadedImageInvalid()
+            }
+            return null
         }
 
         if (!looksLikeVideoContainer(header, expectedExt)) {
             file.delete()
-            return "下载文件格式异常，疑似不可播放，已按失败处理并删除文件"
+            return appText.downloadedVideoInvalid()
         }
 
         return null
@@ -190,6 +201,71 @@ class SyncDownloadStatusUseCase(
             "m3u8" -> false
             else -> isMp4Family || isEbml || isMpegTs || isFlv
         }
+    }
+
+    private fun isImageExt(ext: String): Boolean {
+        return when (ext.lowercase()) {
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> true
+            else -> false
+        }
+    }
+
+    private fun looksLikeImageContainer(header: ByteArray, expectedExt: String): Boolean {
+        if (header.isEmpty()) return false
+        val lowerExt = expectedExt.lowercase()
+
+        val isJpeg = header.size >= 2 &&
+            header[0] == 0xFF.toByte() &&
+            header[1] == 0xD8.toByte()
+        val isPng = header.size >= 8 &&
+            header[0] == 0x89.toByte() &&
+            header[1] == 0x50.toByte() &&
+            header[2] == 0x4E.toByte() &&
+            header[3] == 0x47.toByte()
+        val isGif = header.size >= 6 &&
+            header[0] == 'G'.code.toByte() &&
+            header[1] == 'I'.code.toByte() &&
+            header[2] == 'F'.code.toByte()
+        val isWebp = header.size >= 12 &&
+            header[0] == 'R'.code.toByte() &&
+            header[1] == 'I'.code.toByte() &&
+            header[2] == 'F'.code.toByte() &&
+            header[3] == 'F'.code.toByte() &&
+            header[8] == 'W'.code.toByte() &&
+            header[9] == 'E'.code.toByte() &&
+            header[10] == 'B'.code.toByte() &&
+            header[11] == 'P'.code.toByte()
+        val isBmp = header.size >= 2 &&
+            header[0] == 'B'.code.toByte() &&
+            header[1] == 'M'.code.toByte()
+        val isHeic = header.size >= 12 &&
+            header[4] == 'f'.code.toByte() &&
+            header[5] == 't'.code.toByte() &&
+            header[6] == 'y'.code.toByte() &&
+            header[7] == 'p'.code.toByte() &&
+            (
+                header[8] == 'h'.code.toByte() ||
+                    header[8] == 'm'.code.toByte() ||
+                    header[8] == 'h'.code.toByte()
+                )
+
+        return when (lowerExt) {
+            "jpg", "jpeg" -> isJpeg
+            "png" -> isPng
+            "gif" -> isGif
+            "webp" -> isWebp
+            "bmp" -> isBmp
+            "heic" -> isHeic || isMp4FamilyLike(header)
+            else -> isJpeg || isPng || isGif || isWebp || isBmp || isHeic
+        }
+    }
+
+    private fun isMp4FamilyLike(header: ByteArray): Boolean {
+        return header.size >= 8 &&
+            header[4] == 'f'.code.toByte() &&
+            header[5] == 't'.code.toByte() &&
+            header[6] == 'y'.code.toByte() &&
+            header[7] == 'p'.code.toByte()
     }
 
     private fun DownloadTaskStatus.toParseRecordStatus(): ParseRecordStatus {

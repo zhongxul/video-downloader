@@ -5,6 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.core.content.FileProvider
+import com.example.videodownloader.R
 import com.example.videodownloader.domain.model.DownloadTask
 import java.io.File
 
@@ -16,9 +17,13 @@ data class LocalVideoInfo(
 
 object MediaActionHelper {
     fun openVideo(context: Context, task: DownloadTask): String? {
-        val uri = resolveShareUri(context, task.saveUri) ?: return "未找到本地视频文件"
+        return openMedia(context, task.saveUri, "video/*")
+    }
+
+    fun openMedia(context: Context, saveUri: String?, mimeType: String): String? {
+        val uri = resolveShareUri(context, saveUri) ?: return context.getString(R.string.media_error_not_found)
         val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(uri, "video/*")
+            setDataAndType(uri, mimeType)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
@@ -27,16 +32,16 @@ object MediaActionHelper {
             null
         }.getOrElse {
             if (it is ActivityNotFoundException) {
-                "系统未找到可播放视频的应用"
+                context.getString(R.string.media_error_no_player)
             } else {
-                "打开视频失败"
+                context.getString(R.string.media_error_open_failed)
             }
         }
     }
 
     fun shareVideos(context: Context, tasks: List<DownloadTask>): String? {
         val uris = tasks.mapNotNull { resolveShareUri(context, it.saveUri) }
-        if (uris.isEmpty()) return "未找到可分享的视频文件"
+        if (uris.isEmpty()) return context.getString(R.string.media_error_no_shareable)
 
         val intent = Intent(
             if (uris.size == 1) Intent.ACTION_SEND else Intent.ACTION_SEND_MULTIPLE,
@@ -51,9 +56,9 @@ object MediaActionHelper {
             }
         }
         return runCatching {
-            context.startActivity(Intent.createChooser(intent, "分享视频"))
+            context.startActivity(Intent.createChooser(intent, context.getString(R.string.media_share_chooser)))
             null
-        }.getOrElse { "分享失败" }
+        }.getOrElse { context.getString(R.string.media_error_share_failed) }
     }
 
     fun readLocalVideoInfo(saveUri: String?): LocalVideoInfo? {
@@ -88,4 +93,3 @@ object MediaActionHelper {
         )
     }
 }
-

@@ -1,5 +1,7 @@
 # 多媒体解析与历史页重构 Implementation Plan
 
+> 状态说明：本文档是未来重构实施计划，不代表当前仓库已经全部落地。
+
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
 **Goal:** 在现有 Android 下载器中实现抖音图集/动图下载、X 多媒体保序解析、解析结果页内置预览，以及历史页三栏重构与批量任务状态管理。  
@@ -441,4 +443,3 @@ git commit -m "docs: 更新多媒体解析与历史页重构文档及回归清�
 1. 单元测试通过。
 2. Debug 构建成功。
 3. 核心人工回归场景通过（X 多媒体顺序、Douyin 图集、批量重试、历史页交互）。
-

@@ -1,5 +1,7 @@
 ﻿package com.example.videodownloader.domain.usecase
 
+import com.example.videodownloader.core.text.AppText
+import com.example.videodownloader.core.text.DefaultAppText
 import com.example.videodownloader.data.repository.DownloadTaskRepository
 import com.example.videodownloader.data.repository.ParseRecordRepository
 import com.example.videodownloader.domain.model.DownloadTask
@@ -13,6 +15,7 @@ class CreateDownloadTaskUseCase(
     private val repository: DownloadTaskRepository,
     private val parseRecordRepository: ParseRecordRepository,
     private val downloadGateway: DownloadGateway,
+    private val appText: AppText = DefaultAppText,
 ) {
     suspend operator fun invoke(
         sourceUrl: String,
@@ -21,13 +24,21 @@ class CreateDownloadTaskUseCase(
         format: VideoFormat,
         parseRecordId: String? = null,
         retryFromTaskId: String? = null,
+        totalImageCount: Int? = null,
     ): DownloadTask {
-        require(format.downloadable) { "该选项不是可直接下载的视频文件，请选择其他清晰度重试" }
+        require(format.downloadable) { appText.nonDownloadableOption() }
 
         val now = System.currentTimeMillis()
         val taskId = UUID.randomUUID().toString()
         val targetExt = resolveOutputExt(format.ext)
-        val fileName = buildFileName(title, targetExt)
+        val fileName = buildOutputFileName(
+            title = title,
+            ext = targetExt,
+            formatId = format.formatId,
+            resolution = format.resolution,
+            isImage = isImageExt(targetExt),
+            totalImageCount = totalImageCount,
+        )
         val enqueueResult = downloadGateway.startDownload(
             url = format.downloadUrl,
             fileName = fileName,
@@ -63,7 +74,7 @@ class CreateDownloadTaskUseCase(
                         selectedFormatLabel = format.resolution,
                         selectedExt = targetExt,
                         status = ParseRecordStatus.QUEUED,
-                        message = "已加入下载队列",
+                        message = appText.downloadQueued(),
                         updatedAt = now,
                     ),
                 )
@@ -72,18 +83,8 @@ class CreateDownloadTaskUseCase(
         return task
     }
 
-    private fun buildFileName(title: String, ext: String): String {
-        val safeTitle = title.replace(Regex("[\\\\/:*?\"<>|]"), "_")
-            .trim()
-            .ifBlank { "video" }
-            .trimEnd('.')
-            .take(80)
-        val normalizedExt = normalizeExt(ext)
-        return "$safeTitle.$normalizedExt"
-    }
-
     private fun resolveOutputExt(ext: String): String {
-        val normalized = normalizeExt(ext)
+        val normalized = normalizeOutputExt(ext)
         // m3u8 下载成功后会在本地合并为 mp4 文件，统一按 mp4 管理。
         return if (normalized == "m3u8") "mp4" else normalized
     }
@@ -96,11 +97,4 @@ class CreateDownloadTaskUseCase(
         return fromFileName ?: originalTitle
     }
 
-    private fun normalizeExt(ext: String): String {
-        val value = ext.trim().lowercase().trimStart('.')
-        return when (value) {
-            "mp4", "m3u8", "webm", "mov", "mkv" -> value
-            else -> "mp4"
-        }
-    }
 }

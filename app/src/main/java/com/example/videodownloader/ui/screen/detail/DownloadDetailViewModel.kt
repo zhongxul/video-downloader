@@ -3,6 +3,7 @@
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.videodownloader.R
 import com.example.videodownloader.di.AppContainer
 import com.example.videodownloader.domain.model.DownloadTask
 import kotlinx.coroutines.delay
@@ -24,6 +25,7 @@ class DownloadDetailViewModel(
     private val container: AppContainer,
     private val taskId: String,
 ) : ViewModel() {
+    private val appContext = container.appContext
     private val _uiState = MutableStateFlow(DownloadDetailUiState())
     val uiState: StateFlow<DownloadDetailUiState> = _uiState.asStateFlow()
 
@@ -41,9 +43,11 @@ class DownloadDetailViewModel(
             runCatching {
                 container.pauseDownloadTaskUseCase(taskId)
             }.onSuccess {
-                _uiState.update { it.copy(actionMessage = "任务已暂停") }
+                _uiState.update { it.copy(actionMessage = appContext.getString(R.string.detail_action_paused)) }
             }.onFailure { throwable ->
-                _uiState.update { it.copy(actionMessage = throwable.message ?: "暂停失败") }
+                _uiState.update {
+                    it.copy(actionMessage = throwable.message ?: appContext.getString(R.string.detail_action_pause_failed))
+                }
             }
         }
     }
@@ -53,9 +57,11 @@ class DownloadDetailViewModel(
             runCatching {
                 container.resumeDownloadTaskUseCase(taskId)
             }.onSuccess {
-                _uiState.update { it.copy(actionMessage = "任务已恢复") }
+                _uiState.update { it.copy(actionMessage = appContext.getString(R.string.detail_action_resumed)) }
             }.onFailure { throwable ->
-                _uiState.update { it.copy(actionMessage = throwable.message ?: "继续失败") }
+                _uiState.update {
+                    it.copy(actionMessage = throwable.message ?: appContext.getString(R.string.detail_action_resume_failed))
+                }
             }
         }
     }
@@ -65,9 +71,9 @@ class DownloadDetailViewModel(
             runCatching {
                 container.retryDownloadTaskUseCase(taskId)
             }.onSuccess {
-                _uiState.update { it.copy(actionMessage = "已创建重试任务，请返回历史页查看") }
+                _uiState.update { it.copy(actionMessage = appContext.getString(R.string.detail_action_retry_created)) }
             }.onFailure { throwable ->
-                _uiState.update { it.copy(actionMessage = throwable.message ?: "重试失败") }
+                _uiState.update { it.copy(actionMessage = throwable.message ?: appContext.getString(R.string.detail_action_retry_failed)) }
             }
         }
     }

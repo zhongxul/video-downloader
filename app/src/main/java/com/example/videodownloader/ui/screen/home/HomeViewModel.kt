@@ -3,7 +3,10 @@
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.videodownloader.R
+import com.example.videodownloader.core.net.buildXMediaHeaderMap
 import com.example.videodownloader.di.AppContainer
+import com.example.videodownloader.di.ParseResultPayload
 import com.example.videodownloader.domain.model.ParseRecord
 import com.example.videodownloader.domain.model.ParseRecordStatus
 import com.example.videodownloader.domain.model.ParsedVideoInfo
@@ -36,11 +39,13 @@ data class HomeUiState(
     val recommendedFormatId: String? = null,
     val isSubmitting: Boolean = false,
     val submitMessage: String? = null,
+    val openResultToken: Long? = null,
 )
 
 class HomeViewModel(
     private val container: AppContainer,
 ) : ViewModel() {
+    private val appContext = container.appContext
     private val probeClient = OkHttpClient.Builder()
         .connectTimeout(8, TimeUnit.SECONDS)
         .readTimeout(8, TimeUnit.SECONDS)
@@ -56,6 +61,7 @@ class HomeViewModel(
     }
 
     fun onLinkChanged(value: String) {
+        container.parseResultStore.clear()
         _uiState.update {
             it.copy(
                 linkInput = value,
@@ -70,7 +76,7 @@ class HomeViewModel(
 
     fun fillLinkFromClipboard(value: String) {
         if (value.isBlank()) {
-            _uiState.update { it.copy(submitMessage = "剪贴板为空") }
+            _uiState.update { it.copy(submitMessage = appContext.getString(R.string.home_clipboard_empty)) }
             return
         }
 
@@ -84,7 +90,7 @@ class HomeViewModel(
                     parseRecordId = null,
                     parsedInfo = null,
                     recommendedFormatId = null,
-                    submitMessage = "已从剪贴板提取链接",
+                    submitMessage = appContext.getString(R.string.home_clipboard_link_extracted),
                 )
             }
         } else {
@@ -96,7 +102,7 @@ class HomeViewModel(
                     parseRecordId = null,
                     parsedInfo = null,
                     recommendedFormatId = null,
-                    submitMessage = "剪贴板中未识别到标准链接",
+                    submitMessage = appContext.getString(R.string.home_clipboard_link_not_found),
                 )
             }
         }
@@ -106,9 +112,14 @@ class HomeViewModel(
         _uiState.update { it.copy(submitMessage = null) }
     }
 
+    fun consumeOpenResultToken() {
+        _uiState.update { it.copy(openResultToken = null) }
+    }
+
     fun parseLink() {
         val rawInput = uiState.value.linkInput
         viewModelScope.launch {
+            container.parseResultStore.clear()
             _uiState.update {
                 it.copy(
                     isParsing = true,
@@ -116,18 +127,19 @@ class HomeViewModel(
                     parsedInfo = null,
                     parseRecordId = null,
                     recommendedFormatId = null,
+                    openResultToken = null,
                 )
             }
 
             runCatching {
                 val resolvedUrl = container.parseLinkUseCase.resolveUrl(rawInput)
                 if (isXLink(resolvedUrl)) {
-                    val validation = container.xCookieValidator.validateForParsing()
-                    if (!validation.valid && validation.shouldBlock) {
-                        throw IllegalArgumentException(validation.message ?: "X Cookie 不可用，请更新后重试")
-                    }
-                    if (!validation.valid && !validation.message.isNullOrBlank()) {
-                        _uiState.update { state -> state.copy(submitMessage = validation.message) }
+                    val savedCookie = container.xCookieStore.getCookie().orEmpty().trim()
+                    if (savedCookie.isNotBlank()) {
+                        val validation = container.xCookieValidator.validateForParsing()
+                        if (!validation.valid && !validation.message.isNullOrBlank()) {
+                            _uiState.update { state -> state.copy(submitMessage = validation.message) }
+                        }
                     }
                 }
                 val info = container.parseLinkUseCase(rawInput)
@@ -138,7 +150,7 @@ class HomeViewModel(
                     title = enriched.info.title,
                     coverUrl = enriched.info.coverUrl,
                     status = ParseRecordStatus.PARSED,
-                    message = "解析成功，请选择下载格式",
+                    message = appContext.getString(R.string.home_parse_success_message),
                 )
                 ParseSuccessResult(
                     resolvedUrl = resolvedUrl,
@@ -147,6 +159,14 @@ class HomeViewModel(
                     parseRecordId = recordId,
                 )
             }.onSuccess { result ->
+                container.parseResultStore.save(
+                    ParseResultPayload(
+                        parsedInfo = result.info,
+                        sourceUrl = result.resolvedUrl,
+                        parseRecordId = result.parseRecordId,
+                        recommendedFormatId = result.recommendedFormatId,
+                    ),
+                )
                 _uiState.update {
                     it.copy(
                         linkInput = result.resolvedUrl,
@@ -155,15 +175,16 @@ class HomeViewModel(
                         isParsing = false,
                         parsedInfo = result.info,
                         recommendedFormatId = result.recommendedFormatId,
+                        openResultToken = System.currentTimeMillis(),
                     )
                 }
             }.onFailure { throwable ->
                 val resolvedUrl = runCatching { container.parseLinkUseCase.resolveUrl(rawInput) }.getOrNull()
-                saveParseFailedRecordAsync(rawInput, resolvedUrl, throwable.message ?: "解析失败")
+                saveParseFailedRecordAsync(rawInput, resolvedUrl, throwable.message ?: appContext.getString(R.string.home_parse_failed))
                 _uiState.update {
                     it.copy(
                         isParsing = false,
-                        parseError = throwable.message ?: "解析失败，请稍后重试",
+                        parseError = throwable.message ?: appContext.getString(R.string.home_parse_failed_retry),
                         recommendedFormatId = null,
                     )
                 }
@@ -178,7 +199,7 @@ class HomeViewModel(
 
         if (!format.downloadable) {
             _uiState.update {
-                it.copy(submitMessage = "该选项不是可直接下载的视频文件，请选择其他可下载选项")
+                it.copy(submitMessage = appContext.getString(R.string.home_not_downloadable))
             }
             return
         }
@@ -192,21 +213,69 @@ class HomeViewModel(
                     coverUrl = parsedInfo.coverUrl,
                     format = format,
                     parseRecordId = current.parseRecordId,
+                    totalImageCount = parsedInfo.formats.count { it.downloadable && it.ext.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic") },
                 )
             }.onSuccess {
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
-                        submitMessage = "已加入下载队列",
+                        submitMessage = appContext.getString(R.string.home_task_created),
                     )
                 }
             }.onFailure { throwable ->
                 _uiState.update {
                     it.copy(
                         isSubmitting = false,
-                        submitMessage = throwable.message ?: "创建下载任务失败",
+                        submitMessage = throwable.message ?: appContext.getString(R.string.home_task_create_failed),
                     )
                 }
+            }
+        }
+    }
+
+    fun createAllTasks() {
+        val current = uiState.value
+        val parsedInfo = current.parsedInfo ?: return
+        val sourceUrl = current.parsedSourceUrl ?: current.linkInput
+        val targets = parsedInfo.formats.filter { it.downloadable }
+        if (targets.isEmpty()) {
+            _uiState.update { it.copy(submitMessage = appContext.getString(R.string.home_no_downloadable_options)) }
+            return
+        }
+
+        viewModelScope.launch {
+            _uiState.update { it.copy(isSubmitting = true, submitMessage = null) }
+            var successCount = 0
+            var failedCount = 0
+
+            targets.forEach { format ->
+                runCatching {
+                    container.createDownloadTaskUseCase(
+                        sourceUrl = sourceUrl,
+                        title = parsedInfo.title,
+                        coverUrl = parsedInfo.coverUrl,
+                        format = format,
+                        parseRecordId = null,
+                        totalImageCount = targets.count { it.ext.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic") },
+                    )
+                }.onSuccess {
+                    successCount++
+                }.onFailure {
+                    failedCount++
+                }
+            }
+
+            val message = when {
+                failedCount == 0 -> appContext.getString(R.string.home_batch_created_all, successCount)
+                successCount == 0 -> appContext.getString(R.string.home_batch_create_failed)
+                else -> appContext.getString(R.string.home_batch_created_partial, successCount, failedCount)
+            }
+
+            _uiState.update {
+                it.copy(
+                    isSubmitting = false,
+                    submitMessage = message,
+                )
             }
         }
     }
@@ -264,6 +333,13 @@ class HomeViewModel(
         val expandedFormats = expandM3u8Formats(info.formats, cookie)
         val sizeEnrichedFormats = enrichMp4Size(expandedFormats, cookie)
 
+        if (sizeEnrichedFormats.any(::isImageFormat)) {
+            return@withContext EnrichedFormatMeta(
+                info = info.copy(formats = sizeEnrichedFormats),
+                recommendedFormatId = null,
+            )
+        }
+
         if (sizeEnrichedFormats.size <= 1) {
             return@withContext EnrichedFormatMeta(
                 info = info.copy(formats = sizeEnrichedFormats),
@@ -281,6 +357,13 @@ class HomeViewModel(
             info = info.copy(formats = sortedFormats),
             recommendedFormatId = recommendedId,
         )
+    }
+
+    private fun isImageFormat(format: VideoFormat): Boolean {
+        return when (format.ext.lowercase()) {
+            "jpg", "jpeg", "png", "webp", "gif", "bmp", "heic" -> true
+            else -> false
+        }
     }
 
     private suspend fun enrichMp4Size(formats: List<VideoFormat>, cookie: String?): List<VideoFormat> {
@@ -336,7 +419,7 @@ class HomeViewModel(
                     formatId = "${format.formatId}_hls_$index",
                     resolution = variant.resolutionLabel,
                     ext = "m3u8",
-                    sizeText = variant.bitrateText ?: "分片流",
+                    sizeText = variant.bitrateText ?: appContext.getString(R.string.home_hls_stream),
                     downloadUrl = variant.url,
                     fileSizeBytes = null,
                 )
@@ -349,7 +432,7 @@ class HomeViewModel(
         val cleanSizeText = format.sizeText.orEmpty().trim()
         return format.copy(
             ext = "m3u8",
-            sizeText = if (cleanSizeText.isBlank()) "分片流" else cleanSizeText,
+            sizeText = if (cleanSizeText.isBlank()) appContext.getString(R.string.home_hls_stream) else cleanSizeText,
             fileSizeBytes = null,
         )
     }
@@ -359,7 +442,7 @@ class HomeViewModel(
         val lowerUrl = format.downloadUrl.lowercase()
         if (lowerUrl.contains(".m3u8")) return true
         val sizeText = format.sizeText.orEmpty().lowercase()
-        if (sizeText.contains("hls") || sizeText.contains("m3u8") || sizeText.contains("分片流")) return true
+        if (sizeText.contains("hls") || sizeText.contains("m3u8") || sizeText.contains(appContext.getString(R.string.home_hls_stream))) return true
         return false
     }
 
@@ -390,7 +473,7 @@ class HomeViewModel(
             }
             val height = parseM3u8Height(streamInfo)
             val bandwidth = parseM3u8Bandwidth(streamInfo)
-            val resolutionLabel = if (height > 0) "${height}p" else "原始"
+            val resolutionLabel = if (height > 0) "${height}p" else appContext.getString(R.string.home_original_quality)
             val bitrateText = bandwidthToText(bandwidth)
             result += M3u8VariantMeta(
                 url = resolvedUrl,
@@ -584,15 +667,24 @@ class HomeViewModel(
 
     private fun attachSiteHeaders(builder: Request.Builder, url: String, cookie: String?) {
         val lower = url.lowercase()
-        if (lower.contains("douyin.com") || lower.contains("iesdouyin.com")) {
+        if (isDouyinRelatedUrl(lower)) {
             builder.header("Referer", "https://www.douyin.com/")
         }
-        if (lower.contains("x.com") || lower.contains("twitter.com")) {
-            builder.header("Referer", "https://x.com/")
-            if (!cookie.isNullOrBlank()) {
-                builder.header("Cookie", cookie)
-            }
+        buildXMediaHeaderMap(url, cookie).forEach { (key, value) ->
+            builder.header(key, value)
         }
+    }
+
+    private fun isDouyinRelatedUrl(lowerUrl: String): Boolean {
+        return lowerUrl.contains("douyin.com") ||
+            lowerUrl.contains("iesdouyin.com") ||
+            lowerUrl.contains("douyinpic.com") ||
+            lowerUrl.contains("douyinstatic.com") ||
+            lowerUrl.contains("snssdk.com") ||
+            lowerUrl.contains("amemv.com") ||
+            lowerUrl.contains("ibytedtos.com") ||
+            lowerUrl.contains("byteimg.com") ||
+            lowerUrl.contains("tos-cn-")
     }
 
     private fun needsSizeProbe(sizeText: String?): Boolean {

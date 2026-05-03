@@ -18,8 +18,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import com.example.videodownloader.R
 import com.example.videodownloader.ui.component.AppGradientBackdrop
 import com.example.videodownloader.ui.component.AppSectionCard
 
@@ -40,26 +42,26 @@ fun XLoginWebViewScreen(
             AppSectionCard {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = "登录 X 并获取 Cookie",
+                        text = stringResource(R.string.x_login_title),
                         style = MaterialTheme.typography.titleLarge,
                     )
                     Text(
-                        text = "登录成功后点击保存，自动回填到设置页。",
+                        text = stringResource(R.string.x_login_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onBack) { Text("返回") }
+                        OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_back)) }
                         FilledTonalButton(
                             onClick = {
                                 val cookie = CookieManager.getInstance().getCookie("https://x.com").orEmpty()
                                 onCookieCaptured(cookie)
                             },
                         ) {
-                            Text("保存当前 Cookie")
+                            Text(stringResource(R.string.x_login_save_cookie))
                         }
                         Button(onClick = { webViewHolder.value?.reload() }) {
-                            Text("刷新")
+                            Text(stringResource(R.string.x_login_refresh))
                         }
                     }
                 }

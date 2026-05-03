@@ -1,6 +1,8 @@
 ﻿package com.example.videodownloader.parser
 
 import android.content.Context
+import com.example.videodownloader.core.text.AppText
+import com.example.videodownloader.core.text.DefaultAppText
 import com.example.videodownloader.domain.model.ParsedVideoInfo
 import com.example.videodownloader.domain.model.VideoFormat
 import com.yausername.youtubedl_android.YoutubeDL
@@ -14,6 +16,7 @@ import java.util.Locale
 
 class YtDlpParserGateway(
     context: Context,
+    private val appText: AppText = DefaultAppText,
     private val xCookieProvider: (() -> String?)? = null,
 ) {
     private val appContext = context.applicationContext
@@ -23,7 +26,7 @@ class YtDlpParserGateway(
 
     suspend fun parse(url: String): ParsedVideoInfo? = withContext(Dispatchers.IO) {
         if (!isXHost(url)) return@withContext null
-        require(ensureInitialized()) { "解析器初始化失败，请重启应用后重试" }
+        require(ensureInitialized()) { appText.parserInitFailed() }
 
         val cookie = xCookieProvider?.invoke()?.takeIf { it.isNotBlank() }
         val csrfToken = extractCookieValue(cookie, "ct0")
@@ -132,10 +135,10 @@ class YtDlpParserGateway(
             if (directUrl.isBlank()) return@forEachIndexed
 
             val ext = normalizeExt(format.ext, directUrl)
-            val resolution = format.formatNote.orEmpty().ifBlank { "原始" }
+            val resolution = format.formatNote.orEmpty().ifBlank { appText.originalQuality() }
             val fileSize = format.fileSize.takeIf { it > 0L && !ext.equals("m3u8", ignoreCase = true) }
             val sizeText = when {
-                ext.equals("m3u8", ignoreCase = true) -> "分片流"
+                ext.equals("m3u8", ignoreCase = true) -> appText.segmentedStream()
                 fileSize != null -> humanReadableSize(fileSize)
                 else -> null
             }
@@ -158,7 +161,7 @@ class YtDlpParserGateway(
             if (directUrl.isNotBlank()) {
                 formats += VideoFormat(
                     formatId = "yt_x_direct",
-                    resolution = "原始",
+                    resolution = appText.originalQuality(),
                     ext = normalizeExt(ext = null, fallbackUrl = directUrl),
                     sizeText = null,
                     downloadUrl = directUrl,
@@ -175,7 +178,7 @@ class YtDlpParserGateway(
 
         val sortedFormats = preferMp4Formats(formats.distinctBy { it.downloadUrl })
         return ParsedVideoInfo(
-            title = info.title.orEmpty().ifBlank { "X 视频" },
+            title = info.title.orEmpty().ifBlank { appText.xVideoTitle() },
             coverUrl = info.thumbnail.orEmpty().ifBlank { null },
             formats = sortedFormats,
         )
@@ -259,23 +262,20 @@ class YtDlpParserGateway(
     ): String {
         if (sawAuthIssue) {
             return if (hasCookie) {
-                "X 认证失败，当前 Cookie 可能已失效或不匹配，请重新获取 auth_token 与 ct0 后重试"
+                appText.xAuthFailedWithCookie()
             } else {
-                "X 认证失败，请先在“X 登录设置”中填写有效 Cookie（auth_token + ct0）"
+                appText.xAuthFailedWithoutCookie()
             }
         }
 
         return when {
-            sawNoVideo && sawTransientNetworkIssue ->
-                "该 X 链接暂未解析到可下载视频，且网络链路不稳定，请更换代理节点后重试"
+            sawNoVideo && sawTransientNetworkIssue -> appText.xNoVideoWithNetworkIssue()
 
-            sawNoVideo ->
-                "该 X 链接未检测到可下载视频（可能是图文/GIF、已删除、仅登录可见或受地区限制）"
+            sawNoVideo -> appText.xNoVideoFound()
 
-            sawTransientNetworkIssue ->
-                "访问 X 失败（TLS/代理链路不稳定），请更换代理节点后重试"
+            sawTransientNetworkIssue -> appText.xAccessFailed()
 
-            else -> "当前 X 链接暂时无法解析，请稍后重试"
+            else -> appText.xTemporaryParseFailed()
         }
     }
 

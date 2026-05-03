@@ -2,6 +2,7 @@ package com.example.videodownloader.di
 
 import android.content.Context
 import androidx.room.Room
+import com.example.videodownloader.core.text.AndroidAppText
 import com.example.videodownloader.data.local.AppDatabase
 import com.example.videodownloader.data.local.XCookieStore
 import com.example.videodownloader.data.repository.DownloadTaskRepository
@@ -26,7 +27,7 @@ import com.example.videodownloader.parser.XCookieValidator
 import com.example.videodownloader.parser.YtDlpParserGateway
 
 class AppContainer(context: Context) {
-    private val appContext = context.applicationContext
+    val appContext: Context = context.applicationContext
 
     private val db: AppDatabase = Room.databaseBuilder(
         appContext,
@@ -36,20 +37,22 @@ class AppContainer(context: Context) {
 
     val repository: DownloadTaskRepository = DownloadTaskRepositoryImpl(db.downloadTaskDao())
     val parseRecordRepository: ParseRecordRepository = ParseRecordRepositoryImpl(db.parseRecordDao())
+    val parseResultStore = ParseResultStore()
+    val appText = AndroidAppText(appContext)
     val xCookieStore = XCookieStore(appContext)
-    val xCookieValidator = XCookieValidator(xCookieStore)
-    private val webParser = WebParserGateway { xCookieStore.getCookie() }
-    private val ytDlpParser = YtDlpParserGateway(appContext) { xCookieStore.getCookie() }
+    val xCookieValidator = XCookieValidator(xCookieStore, appText)
+    private val webParser = WebParserGateway(appText) { xCookieStore.getCookie() }
+    private val ytDlpParser = YtDlpParserGateway(appContext, appText) { xCookieStore.getCookie() }
     val parserGateway: ParserGateway = HybridParserGateway(webParser, ytDlpParser)
-    val downloadGateway: DownloadGateway = AndroidDownloadGateway(appContext) { xCookieStore.getCookie() }
+    val downloadGateway: DownloadGateway = AndroidDownloadGateway(appContext, appText) { xCookieStore.getCookie() }
 
-    val parseLinkUseCase = ParseLinkUseCase(parserGateway)
-    val createDownloadTaskUseCase = CreateDownloadTaskUseCase(repository, parseRecordRepository, downloadGateway)
+    val parseLinkUseCase = ParseLinkUseCase(parserGateway, appText)
+    val createDownloadTaskUseCase = CreateDownloadTaskUseCase(repository, parseRecordRepository, downloadGateway, appText)
     val observeHistoryUseCase = ObserveHistoryUseCase(repository)
     val observeTaskDetailUseCase = ObserveTaskDetailUseCase(repository)
-    val retryDownloadTaskUseCase = RetryDownloadTaskUseCase(repository, downloadGateway)
-    val syncDownloadStatusUseCase = SyncDownloadStatusUseCase(repository, parseRecordRepository, downloadGateway)
-    val pauseDownloadTaskUseCase = PauseDownloadTaskUseCase(repository, downloadGateway)
-    val resumeDownloadTaskUseCase = ResumeDownloadTaskUseCase(repository, downloadGateway)
+    val retryDownloadTaskUseCase = RetryDownloadTaskUseCase(repository, downloadGateway, appText)
+    val syncDownloadStatusUseCase = SyncDownloadStatusUseCase(repository, parseRecordRepository, downloadGateway, appText)
+    val pauseDownloadTaskUseCase = PauseDownloadTaskUseCase(repository, downloadGateway, appText)
+    val resumeDownloadTaskUseCase = ResumeDownloadTaskUseCase(repository, downloadGateway, appText)
     val clearFinishedHistoryUseCase = ClearFinishedHistoryUseCase(repository)
 }

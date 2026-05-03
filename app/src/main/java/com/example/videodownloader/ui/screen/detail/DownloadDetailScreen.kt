@@ -23,11 +23,15 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.example.videodownloader.R
 import com.example.videodownloader.domain.model.DownloadTaskStatus
 import com.example.videodownloader.ui.component.AppGradientBackdrop
 import com.example.videodownloader.ui.component.AppSectionCard
+import com.example.videodownloader.ui.downloadTaskStatusText
 
 @Composable
 fun DownloadDetailScreen(
@@ -36,6 +40,7 @@ fun DownloadDetailScreen(
 ) {
     val state by viewModel.uiState.collectAsState()
     val snackbarHostState = remember { SnackbarHostState() }
+    val context = LocalContext.current
 
     LaunchedEffect(state.actionMessage) {
         val msg = state.actionMessage ?: return@LaunchedEffect
@@ -58,7 +63,7 @@ fun DownloadDetailScreen(
             if (task == null) {
                 Column(modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp)) {
                     AppSectionCard {
-                        Text("任务不存在", color = MaterialTheme.colorScheme.error)
+                        Text(stringResource(R.string.detail_missing_task), color = MaterialTheme.colorScheme.error)
                     }
                 }
                 return@Box
@@ -72,16 +77,16 @@ fun DownloadDetailScreen(
                 item {
                     AppSectionCard {
                         Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                            OutlinedButton(onClick = onBack) { Text("返回") }
-                            Text("下载详情", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
-                            Text("标题：${task.title}")
-                            Text("状态：${task.status.toDisplayName()}")
-                            Text("进度：${task.progress}%")
-                            Text("格式：${task.selectedResolution} · ${task.selectedExt}")
-                            Text("来源：${task.sourceUrl}")
-                            Text("下载链接：${task.downloadUrl}")
-                            task.saveUri?.let { Text("本地路径：$it") }
-                            task.errorMessage?.let { Text("错误：$it", color = MaterialTheme.colorScheme.error) }
+                            OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_back)) }
+                            Text(stringResource(R.string.detail_title), style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
+                            Text(stringResource(R.string.detail_field_title, task.title))
+                            Text(stringResource(R.string.detail_field_status, context.downloadTaskStatusText(task.status)))
+                            Text(stringResource(R.string.detail_field_progress, task.progress))
+                            Text(stringResource(R.string.detail_field_format, task.selectedResolution, task.selectedExt))
+                            Text(stringResource(R.string.detail_field_source, task.sourceUrl))
+                            Text(stringResource(R.string.detail_field_download_url, task.downloadUrl))
+                            task.saveUri?.let { Text(stringResource(R.string.detail_field_local_path, it)) }
+                            task.errorMessage?.let { Text(stringResource(R.string.detail_field_error, it), color = MaterialTheme.colorScheme.error) }
                         }
                     }
                 }
@@ -93,28 +98,18 @@ fun DownloadDetailScreen(
                             horizontalArrangement = Arrangement.spacedBy(8.dp),
                         ) {
                             if (task.status == DownloadTaskStatus.DOWNLOADING || task.status == DownloadTaskStatus.QUEUED) {
-                                Button(onClick = viewModel::pauseTask) { Text("暂停") }
+                                Button(onClick = viewModel::pauseTask) { Text(stringResource(R.string.detail_pause)) }
                             }
                             if (task.status == DownloadTaskStatus.CANCELED) {
-                                FilledTonalButton(onClick = viewModel::resumeTask) { Text("继续") }
+                                FilledTonalButton(onClick = viewModel::resumeTask) { Text(stringResource(R.string.detail_resume)) }
                             }
                             if (task.status == DownloadTaskStatus.FAILED) {
-                                Button(onClick = viewModel::retryTask) { Text("重试") }
+                                Button(onClick = viewModel::retryTask) { Text(stringResource(R.string.common_retry)) }
                             }
                         }
                     }
                 }
             }
         }
-    }
-}
-
-private fun DownloadTaskStatus.toDisplayName(): String {
-    return when (this) {
-        DownloadTaskStatus.QUEUED -> "排队中"
-        DownloadTaskStatus.DOWNLOADING -> "下载中"
-        DownloadTaskStatus.SUCCESS -> "成功"
-        DownloadTaskStatus.FAILED -> "失败"
-        DownloadTaskStatus.CANCELED -> "已取消"
     }
 }
