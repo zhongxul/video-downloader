@@ -6,6 +6,7 @@ import com.example.videodownloader.domain.model.DownloadTaskStatus
 import com.example.videodownloader.domain.model.ParseRecord
 import com.example.videodownloader.domain.model.ParseRecordStatus
 import com.example.videodownloader.domain.model.VideoFormat
+import com.example.videodownloader.domain.usecase.isDisplayableFormat
 import com.example.videodownloader.ui.redesign.detail.DetailUiState
 import com.example.videodownloader.ui.redesign.detail.DetailMediaItem
 import com.example.videodownloader.ui.redesign.detail.MetaItem
@@ -25,7 +26,7 @@ private val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic"
 private val videoExts = setOf("mp4", "m4v", "mov", "mkv", "webm", "ts", "m3u8")
 
 fun ParseResultPayload.toRedesignParseResultUiState(currentIndex: Int = 0): ParseResultUiState {
-    val formats = parsedInfo.formats
+    val formats = parsedInfo.formats.filter(::isDisplayableFormat)
     val safeIndex = currentIndex.coerceIn(0, (formats.size - 1).coerceAtLeast(0))
     val selected = formats.getOrNull(safeIndex)
     return ParseResultUiState(
@@ -121,11 +122,20 @@ fun DownloadTask.toRedesignDetailUiState(): DetailUiState {
     return listOf(this).toRedesignDetailUiState(id)
 }
 
-fun List<DownloadTask>.toRedesignDetailUiState(groupId: String, currentIndex: Int = 0): DetailUiState {
+fun List<DownloadTask>.toRedesignDetailUiState(
+    groupId: String,
+    currentIndex: Int = 0,
+    successOnly: Boolean = false,
+): DetailUiState {
     if (isEmpty()) {
         return DetailUiState(taskId = groupId, title = "任务不存在", statusLabel = "未知")
     }
-    val sorted = sortedBy { it.createdAt }
+    val displayTasks = if (successOnly) {
+        filter { it.status == DownloadTaskStatus.SUCCESS }.ifEmpty { this }
+    } else {
+        this
+    }
+    val sorted = displayTasks.sortedBy { it.createdAt }
     val safeIndex = currentIndex.coerceIn(0, sorted.lastIndex)
     val first = sorted.first()
     val selected = sorted[safeIndex]
@@ -141,7 +151,8 @@ fun List<DownloadTask>.toRedesignDetailUiState(groupId: String, currentIndex: In
     return DetailUiState(
         taskId = groupId,
         title = if (sorted.size > 1) "${first.title.substringBeforeLast(" · ")} · ${sorted.size} 项" else first.title,
-        subtitle = "${first.sourceUrl.sourceName()} · ${sorted.maxOf { it.updatedAt }.relativeTime()} 更新",
+        sourceTitle = sorted.sourceTitle(),
+        subtitle = "${first.sourceUrl.sourceName()} · ${sorted.maxOf { it.updatedAt }.relativeTime()}",
         status = mappedStatus,
         statusLabel = status.statusLabel(sorted.firstOrNull { it.errorMessage != null }?.errorMessage),
         previewUrl = selected.coverUrl,
@@ -180,6 +191,18 @@ private fun DownloadTask.mediaPreviewUrl(): String? {
         ext in videoExts -> saveUri ?: downloadUrl
         else -> coverUrl ?: saveUri ?: downloadUrl
     }
+}
+
+private fun List<DownloadTask>.sourceTitle(): String {
+    val first = firstOrNull() ?: return "媒体视频"
+    val platform = when {
+        first.sourceUrl.contains("douyin", ignoreCase = true) -> "抖音"
+        first.sourceUrl.contains("x.com", ignoreCase = true) ||
+            first.sourceUrl.contains("twitter.com", ignoreCase = true) -> "X"
+        else -> "媒体"
+    }
+    val hasImage = any { it.selectedExt.lowercase() in imageExts }
+    return "$platform${if (hasImage) "图集" else "视频"}"
 }
 
 private fun VideoFormat.toVersionInfo(index: Int): VersionInfo {

@@ -8,6 +8,8 @@ data class LibraryUiState(
     val inProgressCount: Int = 0,
     val completedCount: Int = 0,
     val parseRecordCount: Int = 0,
+    val inProgressManageMode: Boolean = false,
+    val selectedInProgressIds: Set<String> = emptySet(),
     val completedManageMode: Boolean = false,
     val selectedCompletedIds: Set<String> = emptySet(),
     val parseManageMode: Boolean = false,

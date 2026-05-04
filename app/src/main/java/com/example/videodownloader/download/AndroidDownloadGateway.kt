@@ -46,6 +46,7 @@ class AndroidDownloadGateway(
     private val context: Context,
     private val appText: AppText,
     private val xCookieProvider: (() -> String?)? = null,
+    private val notificationEnabledProvider: () -> Boolean = { true },
 ) : DownloadGateway {
     private companion object {
         const val TAG = "AndroidDownloadGateway"
@@ -109,7 +110,11 @@ class AndroidDownloadGateway(
             .setTitle(finalFileName)
             .setMimeType(inferMimeType(finalFileName))
             .setNotificationVisibility(
-                DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED,
+                if (notificationEnabledProvider()) {
+                    DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED
+                } else {
+                    DownloadManager.Request.VISIBILITY_HIDDEN
+                },
             )
             .setVisibleInDownloadsUi(true)
             .setDestinationInExternalPublicDir(

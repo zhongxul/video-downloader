@@ -556,53 +556,90 @@ class WebParserGateway(
             title = tweet.optString("text")
                 .ifBlank { tweet.optJSONObject("raw_text")?.optString("text").orEmpty() }
             val media = tweet.optJSONObject("media")
-            val photoArray = media?.optJSONArray("photos")
-                ?: media?.optJSONArray("all")
-            if (photoArray != null) {
-                for (index in 0 until photoArray.length()) {
-                    val item = photoArray.optJSONObject(index) ?: continue
-                    val type = item.optString("type")
-                    if (!type.equals("photo", ignoreCase = true)) continue
-                    val imageUrl = normalizeVideoUrl(item.optString("url"))
-                    if (!isLikelyXImageUrl(imageUrl)) continue
-                    formats += VideoFormat(
-                        formatId = "x_fx_api_$index",
-                        resolution = appText.imageLabel(index + 1),
-                        ext = inferImageExtFromUrl(imageUrl),
-                        sizeText = null,
-                        downloadUrl = imageUrl,
-                        downloadable = true,
-                    )
-                }
-            }
+            formats += parseFxTwitterMediaArray(media?.optJSONArray("photos"), "x_fx_photo")
+            formats += parseFxTwitterMediaArray(media?.optJSONArray("videos"), "x_fx_video")
+            formats += parseFxTwitterMediaArray(media?.optJSONArray("all"), "x_fx_all")
         }
         if (formats.isEmpty()) {
             val mediaExtended = root.optJSONArray("media_extended")
             if (mediaExtended != null) {
-                for (index in 0 until mediaExtended.length()) {
-                    val item = mediaExtended.optJSONObject(index) ?: continue
-                    val type = item.optString("type")
-                    if (!type.equals("image", ignoreCase = true) && !type.equals("photo", ignoreCase = true)) continue
-                    val imageUrl = normalizeVideoUrl(item.optString("url").ifBlank { item.optString("thumbnail_url") })
-                    if (!isLikelyXImageUrl(imageUrl)) continue
-                    formats += VideoFormat(
-                        formatId = "x_vx_api_$index",
-                        resolution = appText.imageLabel(index + 1),
-                        ext = inferImageExtFromUrl(imageUrl),
-                        sizeText = null,
-                        downloadUrl = imageUrl,
-                        downloadable = true,
-                    )
-                }
+                formats += parseFxTwitterMediaArray(mediaExtended, "x_vx_api")
             }
         }
         if (formats.isEmpty()) return null
 
         return ParsedVideoInfo(
             title = sanitizeTitle(title).ifBlank { appText.xVideoTitle() },
-            coverUrl = formats.firstOrNull()?.downloadUrl,
+            coverUrl = extractFxTwitterCoverUrl(root) ?: formats.firstOrNull()?.downloadUrl,
             formats = formats.distinctBy { it.downloadUrl },
         )
+    }
+
+    private fun extractFxTwitterCoverUrl(root: JSONObject): String? {
+        val media = root.optJSONObject("tweet")?.optJSONObject("media")
+        listOf(
+            media?.optJSONArray("photos"),
+            media?.optJSONArray("all"),
+            media?.optJSONArray("videos"),
+            root.optJSONArray("media_extended"),
+        ).forEach { array ->
+            if (array == null) return@forEach
+            for (index in 0 until array.length()) {
+                val item = array.optJSONObject(index) ?: continue
+                val imageUrl = normalizeVideoUrl(item.optString("url"))
+                if (isLikelyXImageUrl(imageUrl)) return imageUrl
+                val thumbnailUrl = normalizeVideoUrl(item.optString("thumbnail_url"))
+                if (thumbnailUrl.isNotBlank()) return thumbnailUrl
+            }
+        }
+        return null
+    }
+
+    private fun parseFxTwitterMediaArray(array: JSONArray?, formatPrefix: String): List<VideoFormat> {
+        if (array == null) return emptyList()
+
+        val result = mutableListOf<VideoFormat>()
+        for (index in 0 until array.length()) {
+            val item = array.optJSONObject(index) ?: continue
+            val type = item.optString("type")
+            when {
+                type.equals("photo", ignoreCase = true) || type.equals("image", ignoreCase = true) -> {
+                    val imageUrl = normalizeVideoUrl(item.optString("url").ifBlank { item.optString("thumbnail_url") })
+                    if (!isLikelyXImageUrl(imageUrl)) continue
+                    result += VideoFormat(
+                        formatId = "${formatPrefix}_$index",
+                        resolution = appText.imageLabel(index + 1),
+                        ext = inferImageExtFromUrl(imageUrl),
+                        sizeText = null,
+                        downloadUrl = imageUrl,
+                        downloadable = true,
+                    )
+                }
+
+                type.equals("video", ignoreCase = true) || type.equals("animated_gif", ignoreCase = true) -> {
+                    val videoUrl = normalizeVideoUrl(item.optString("url"))
+                    if (!isLikelyXVideoUrl(videoUrl)) continue
+                    val height = item.optInt("height", 0)
+                        .takeIf { it > 0 }
+                        ?: item.optJSONObject("size")?.optInt("height", 0)?.takeIf { it > 0 }
+                        ?: parseResolutionHeightFromUrl(videoUrl)
+                    result += VideoFormat(
+                        formatId = "${formatPrefix}_$index",
+                        resolution = if (height > 0) "${height}p" else appText.originalQuality(),
+                        ext = inferMediaExtFromUrl(videoUrl, "mp4"),
+                        sizeText = null,
+                        downloadUrl = videoUrl,
+                        durationSec = item.optDouble("duration", Double.NaN)
+                            .takeIf { !it.isNaN() && it > 0.0 }
+                            ?: item.optDouble("duration_millis", Double.NaN)
+                                .takeIf { !it.isNaN() && it > 0.0 }
+                                ?.div(1000.0),
+                        downloadable = true,
+                    )
+                }
+            }
+        }
+        return result
     }
 
     private suspend fun parseXStatusFast(url: String): ParsedVideoInfo? = coroutineScope {
@@ -867,6 +904,21 @@ class WebParserGateway(
                 )
     }
 
+    private fun isLikelyXVideoUrl(url: String): Boolean {
+        val lower = url.lowercase()
+        return lower.contains("video.twimg.com/") &&
+            (lower.contains(".mp4") || lower.contains(".m3u8"))
+    }
+
+    private fun parseResolutionHeightFromUrl(url: String): Int {
+        return Regex("""/(\d{3,4})x(\d{3,4})/""", RegexOption.IGNORE_CASE)
+            .find(url)
+            ?.groupValues
+            ?.getOrNull(2)
+            ?.toIntOrNull()
+            ?: 0
+    }
+
     private fun extractXInitialStateJson(html: String): String? {
         val marker = "window.__INITIAL_STATE__="
         val start = html.indexOf(marker)
@@ -911,6 +963,7 @@ class WebParserGateway(
             val item = array.optJSONObject(i) ?: continue
             val src = normalizeVideoUrl(item.optString("src").ifBlank { item.optString("url") })
             if (src.isBlank()) continue
+            if (!isLikelyTwitterVideoVariant(item, src)) continue
 
             val bitrate = item.optInt("bitrate", -1)
             val resolution = when {
@@ -931,7 +984,27 @@ class WebParserGateway(
             )
         }
 
-        return result.sortedByDescending { it.sizeText ?: "" }
+        return result.sortedWith(
+            compareByDescending<VideoFormat> { parseResolutionHeight(it.resolution) }
+                .thenByDescending { parseBitrateKbps(it.sizeText) }
+                .thenBy { it.downloadUrl },
+        )
+    }
+
+    private fun isLikelyTwitterVideoVariant(item: JSONObject, src: String): Boolean {
+        val contentType = item.optString("content_type").lowercase()
+        if (contentType.startsWith("audio/")) return false
+        if (contentType.isNotBlank() &&
+            !contentType.startsWith("video/") &&
+            !contentType.contains("mpegurl") &&
+            !contentType.contains("vnd.apple.mpegurl")
+        ) {
+            return false
+        }
+
+        val lowerUrl = src.lowercase()
+        if (lowerUrl.contains("/audio/") || lowerUrl.contains("audio_")) return false
+        return lowerUrl.contains(".mp4") || lowerUrl.contains(".m3u8")
     }
 
     private fun parseMediaDetails(array: JSONArray, durationSec: Double?): List<VideoFormat> {
@@ -1501,6 +1574,42 @@ class WebParserGateway(
             lower.contains("540") -> "540p"
             else -> appText.originalQuality()
         }
+    }
+
+    private fun parseResolutionHeight(resolution: String?): Int {
+        val text = resolution.orEmpty().lowercase()
+        if (text.isBlank()) return 0
+
+        val pValue = Regex("(\\d{3,4})\\s*p", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(1)
+            ?.toIntOrNull()
+        if (pValue != null && pValue > 0) return pValue
+
+        val xValue = Regex("(\\d{3,4})\\s*x\\s*(\\d{3,4})", RegexOption.IGNORE_CASE)
+            .find(text)
+            ?.groupValues
+            ?.getOrNull(2)
+            ?.toIntOrNull()
+        if (xValue != null && xValue > 0) return xValue
+
+        return 0
+    }
+
+    private fun parseBitrateKbps(sizeText: String?): Long {
+        val text = sizeText.orEmpty().lowercase().trim()
+        if (text.isBlank()) return 0L
+        val match = Regex("(\\d+(?:\\.\\d+)?)\\s*(k|m|g)?bps", RegexOption.IGNORE_CASE).find(text) ?: return 0L
+        val value = match.groupValues.getOrNull(1)?.toDoubleOrNull() ?: return 0L
+        val unit = match.groupValues.getOrNull(2).orEmpty().lowercase()
+        val multiplier = when (unit) {
+            "g" -> 1_000_000.0
+            "m" -> 1_000.0
+            "k" -> 1.0
+            else -> 0.001
+        }
+        return (value * multiplier).toLong()
     }
 
     private fun extractTweetId(url: String): String? {

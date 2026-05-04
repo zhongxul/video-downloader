@@ -5,14 +5,11 @@ import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
-import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.mutableStateOf
@@ -24,6 +21,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import com.example.videodownloader.R
 import com.example.videodownloader.ui.component.AppGradientBackdrop
 import com.example.videodownloader.ui.component.AppSectionCard
+import com.example.videodownloader.ui.redesign.component.AppTopBar
 
 @Composable
 fun XLoginWebViewScreen(
@@ -35,39 +33,39 @@ fun XLoginWebViewScreen(
     AppGradientBackdrop {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
-            AppSectionCard {
+            AppTopBar(
+                title = stringResource(R.string.x_login_title),
+                showBack = true,
+                onBack = onBack,
+                rightActionText = stringResource(R.string.x_login_save_cookie),
+                onRightAction = {
+                    val cookie = CookieManager.getInstance().getCookie("https://x.com").orEmpty()
+                    onCookieCaptured(cookie)
+                },
+            )
+            AppSectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
+            ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(
-                        text = stringResource(R.string.x_login_title),
-                        style = MaterialTheme.typography.titleLarge,
-                    )
                     Text(
                         text = stringResource(R.string.x_login_subtitle),
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_back)) }
-                        FilledTonalButton(
-                            onClick = {
-                                val cookie = CookieManager.getInstance().getCookie("https://x.com").orEmpty()
-                                onCookieCaptured(cookie)
-                            },
-                        ) {
-                            Text(stringResource(R.string.x_login_save_cookie))
-                        }
-                        Button(onClick = { webViewHolder.value?.reload() }) {
-                            Text(stringResource(R.string.x_login_refresh))
-                        }
+                    Button(onClick = { webViewHolder.value?.reload() }) {
+                        Text(stringResource(R.string.x_login_refresh))
                     }
                 }
             }
 
-            AppSectionCard(modifier = Modifier.weight(1f)) {
+            AppSectionCard(
+                modifier = Modifier
+                    .weight(1f)
+                    .padding(horizontal = 16.dp),
+            ) {
                 AndroidView(
                     modifier = Modifier
                         .fillMaxWidth()

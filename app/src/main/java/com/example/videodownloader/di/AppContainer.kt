@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.example.videodownloader.core.text.AndroidAppText
 import com.example.videodownloader.data.local.AppDatabase
+import com.example.videodownloader.data.local.AppSettingsStore
 import com.example.videodownloader.data.local.XCookieStore
 import com.example.videodownloader.data.repository.DownloadTaskRepository
 import com.example.videodownloader.data.repository.DownloadTaskRepositoryImpl
@@ -39,12 +40,18 @@ class AppContainer(context: Context) {
     val parseRecordRepository: ParseRecordRepository = ParseRecordRepositoryImpl(db.parseRecordDao())
     val parseResultStore = ParseResultStore()
     val appText = AndroidAppText(appContext)
+    val appSettingsStore = AppSettingsStore(appContext)
     val xCookieStore = XCookieStore(appContext)
     val xCookieValidator = XCookieValidator(xCookieStore, appText)
     private val webParser = WebParserGateway(appText) { xCookieStore.getCookie() }
     private val ytDlpParser = YtDlpParserGateway(appContext, appText) { xCookieStore.getCookie() }
     val parserGateway: ParserGateway = HybridParserGateway(webParser, ytDlpParser)
-    val downloadGateway: DownloadGateway = AndroidDownloadGateway(appContext, appText) { xCookieStore.getCookie() }
+    val downloadGateway: DownloadGateway = AndroidDownloadGateway(
+        context = appContext,
+        appText = appText,
+        xCookieProvider = { xCookieStore.getCookie() },
+        notificationEnabledProvider = { appSettingsStore.isDownloadNotificationEnabled() },
+    )
 
     val parseLinkUseCase = ParseLinkUseCase(parserGateway, appText)
     val createDownloadTaskUseCase = CreateDownloadTaskUseCase(repository, parseRecordRepository, downloadGateway, appText)

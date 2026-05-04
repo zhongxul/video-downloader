@@ -4,6 +4,7 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.videodownloader.di.AppContainer
+import com.example.videodownloader.domain.model.DownloadTaskStatus
 import com.example.videodownloader.ui.redesign.buildRedesignLibraryUiState
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.channels.Channel
@@ -36,12 +37,32 @@ class LibraryViewModel(
                 _uiState.value = _uiState.value.copy(currentTab = action.tab)
             }
             is LibraryAction.OpenDetail -> {
-                viewModelScope.launch { _events.send(LibraryUiEvent.NavigateToDetail(action.taskId)) }
+                viewModelScope.launch {
+                    _events.send(LibraryUiEvent.NavigateToDetail(action.taskId, action.successOnly))
+                }
             }
             is LibraryAction.OpenParseResult -> {
                 _uiState.value = _uiState.value.copy(
                     expandedParseIds = _uiState.value.expandedParseIds.toggle(action.parseRecordId),
                 )
+            }
+            is LibraryAction.EnterInProgressManage -> {
+                _uiState.value = _uiState.value.copy(
+                    inProgressManageMode = true,
+                    selectedInProgressIds = setOf(action.itemId),
+                )
+            }
+            is LibraryAction.ToggleInProgressSelection -> {
+                val selected = _uiState.value.selectedInProgressIds.toggle(action.itemId)
+                _uiState.value = _uiState.value.copy(selectedInProgressIds = selected)
+            }
+            LibraryAction.ToggleSelectAllInProgress -> {
+                val ids = _uiState.value.inProgressItems.map { it.id }.toSet()
+                val allSelected = ids.isNotEmpty() && ids.all { it in _uiState.value.selectedInProgressIds }
+                _uiState.value = _uiState.value.copy(selectedInProgressIds = if (allSelected) emptySet() else ids)
+            }
+            LibraryAction.DeleteSelectedInProgress -> {
+                deleteInProgressSelection()
             }
             is LibraryAction.EnterCompletedManage -> {
                 _uiState.value = _uiState.value.copy(
@@ -81,6 +102,8 @@ class LibraryViewModel(
             }
             LibraryAction.ExitManageMode -> {
                 _uiState.value = _uiState.value.copy(
+                    inProgressManageMode = false,
+                    selectedInProgressIds = emptySet(),
                     completedManageMode = false,
                     selectedCompletedIds = emptySet(),
                     parseManageMode = false,
@@ -103,6 +126,13 @@ class LibraryViewModel(
                     records = records,
                     currentTab = previous.currentTab,
                 ).copy(
+                    inProgressManageMode = previous.inProgressManageMode,
+                    selectedInProgressIds = previous.selectedInProgressIds.intersect(
+                        tasks
+                            .filter { it.status != DownloadTaskStatus.SUCCESS }
+                            .map { it.parseRecordId ?: it.id }
+                            .toSet(),
+                    ),
                     completedManageMode = previous.completedManageMode,
                     selectedCompletedIds = previous.selectedCompletedIds.intersect(tasks.map { it.parseRecordId ?: it.id }.toSet()),
                     parseManageMode = previous.parseManageMode,
@@ -140,6 +170,28 @@ class LibraryViewModel(
             }.onSuccess {
                 _events.send(LibraryUiEvent.ShowToast("已删除 ${taskIds.size} 个任务"))
                 _uiState.value = _uiState.value.copy(completedManageMode = false, selectedCompletedIds = emptySet())
+            }.onFailure {
+                _events.send(LibraryUiEvent.ShowToast(it.message ?: "删除失败"))
+            }
+        }
+    }
+
+    private fun deleteInProgressSelection() {
+        val selectedIds = _uiState.value.selectedInProgressIds
+        val taskIds = _uiState.value.inProgressItems
+            .filter { it.id in selectedIds }
+            .flatMap { it.taskIds.ifEmpty { listOf(it.id) } }
+        if (taskIds.isEmpty()) return
+        viewModelScope.launch {
+            runCatching {
+                val tasks = container.repository.getTasks(taskIds)
+                tasks.forEach { task ->
+                    task.externalDownloadId?.let { container.downloadGateway.cancelDownload(it) }
+                }
+                container.repository.deleteTasks(taskIds)
+            }.onSuccess {
+                _events.send(LibraryUiEvent.ShowToast("已删除 ${taskIds.size} 个任务"))
+                _uiState.value = _uiState.value.copy(inProgressManageMode = false, selectedInProgressIds = emptySet())
             }.onFailure {
                 _events.send(LibraryUiEvent.ShowToast(it.message ?: "删除失败"))
             }

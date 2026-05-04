@@ -19,6 +19,7 @@ import com.example.videodownloader.ui.redesign.parse_result.ParseResultScreen
 import com.example.videodownloader.ui.redesign.parse_result.ParseResultViewModelFactory
 import com.example.videodownloader.ui.redesign.profile.ProfileScreen
 import com.example.videodownloader.ui.redesign.profile.ProfileViewModel
+import com.example.videodownloader.ui.redesign.profile.ProfileViewModelFactory
 import com.example.videodownloader.ui.redesign.theme.AppDesignTheme
 import com.example.videodownloader.ui.screen.settings.XLoginWebViewScreen
 import com.example.videodownloader.ui.screen.settings.XSettingsScreen
@@ -30,12 +31,12 @@ object AppRoutes {
     const val LIBRARY = "library"
     const val PROFILE = "profile"
     const val PARSE_RESULT = "parse_result/{parseRecordId}"
-    const val DETAIL = "detail/{taskId}"
+    const val DETAIL = "detail/{taskId}?successOnly={successOnly}"
     const val X_SETTINGS = "x_settings"
     const val X_LOGIN = "x_login"
 
     fun parseResult(parseRecordId: String) = "parse_result/$parseRecordId"
-    fun detail(taskId: String) = "detail/$taskId"
+    fun detail(taskId: String, successOnly: Boolean = false) = "detail/$taskId?successOnly=$successOnly"
 }
 
 private fun NavHostController.navigateTopLevel(route: String) {
@@ -88,14 +89,14 @@ fun RedesignNavHost(
                     onNavigateToProfile = {
                         navController.navigateTopLevel(AppRoutes.PROFILE)
                     },
-                    onNavigateToDetail = { taskId ->
-                        navController.navigate(AppRoutes.detail(taskId))
+                    onNavigateToDetail = { taskId, successOnly ->
+                        navController.navigate(AppRoutes.detail(taskId, successOnly))
                     },
                 )
             }
 
             composable(AppRoutes.PROFILE) {
-                val vm: ProfileViewModel = viewModel()
+                val vm: ProfileViewModel = viewModel(factory = ProfileViewModelFactory(container))
                 ProfileScreen(
                     viewModel = vm,
                     onNavigateToDownload = {
@@ -126,11 +127,18 @@ fun RedesignNavHost(
 
             composable(
                 route = AppRoutes.DETAIL,
-                arguments = listOf(navArgument("taskId") { type = NavType.StringType }),
+                arguments = listOf(
+                    navArgument("taskId") { type = NavType.StringType },
+                    navArgument("successOnly") {
+                        type = NavType.BoolType
+                        defaultValue = false
+                    },
+                ),
             ) { backStackEntry ->
                 val taskId = backStackEntry.arguments?.getString("taskId").orEmpty()
+                val successOnly = backStackEntry.arguments?.getBoolean("successOnly") ?: false
                 val vm: com.example.videodownloader.ui.redesign.detail.DetailViewModel = viewModel(
-                    factory = DetailViewModelFactory(container, taskId),
+                    factory = DetailViewModelFactory(container, taskId, successOnly),
                 )
                 DetailScreen(
                     viewModel = vm,

@@ -19,6 +19,7 @@ import kotlinx.coroutines.launch
 class DetailViewModel(
     private val container: AppContainer,
     private val taskId: String,
+    private val successOnly: Boolean = false,
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(DetailUiState(taskId = taskId))
@@ -27,6 +28,7 @@ class DetailViewModel(
     private val _events = Channel<DetailUiEvent>(Channel.BUFFERED)
     val events = _events.receiveAsFlow()
     private var currentTasks: List<DownloadTask> = emptyList()
+    private var visibleTasks: List<DownloadTask> = emptyList()
 
     init {
         observeTask()
@@ -36,27 +38,20 @@ class DetailViewModel(
     fun onAction(action: DetailAction) {
         when (action) {
             is DetailAction.SelectMedia -> {
-                _uiState.value = currentTasks.toRedesignDetailUiState(taskId, action.index)
+                _uiState.value = currentTasks.toRedesignDetailUiState(taskId, action.index, successOnly)
+            }
+            is DetailAction.OpenMedia -> {
+                openMediaAt(action.index)
             }
             DetailAction.GoBack -> {
                 viewModelScope.launch { _events.send(DetailUiEvent.NavigateBack) }
             }
             DetailAction.OpenContent -> {
-                val state = _uiState.value
-                val currentItem = state.mediaItems.getOrNull(state.currentIndex)
-                val path = currentItem?.saveUri
-                    ?: state.metaItems.firstOrNull { it.label == "保存路径" }?.value.orEmpty()
-                viewModelScope.launch {
-                    if (path.isBlank() || path == "尚未生成本地文件") {
-                        _events.send(DetailUiEvent.ShowToast("本地文件还不可用"))
-                    } else {
-                        _events.send(DetailUiEvent.OpenFile(path, currentItem?.ext.toMimeType()))
-                    }
-                }
+                openMediaAt(_uiState.value.currentIndex)
             }
             DetailAction.DeleteRecord -> {
                 viewModelScope.launch {
-                    val targets = currentTasks.ifEmpty { container.repository.getTask(taskId)?.let { listOf(it) }.orEmpty() }
+                    val targets = visibleTasks.ifEmpty { container.repository.getTask(taskId)?.let { listOf(it) }.orEmpty() }
                     runCatching {
                         targets.forEach { task ->
                             task.externalDownloadId?.let { container.downloadGateway.cancelDownload(it) }
@@ -107,11 +102,30 @@ class DetailViewModel(
         }
     }
 
+    private fun openMediaAt(index: Int) {
+        val state = _uiState.value
+        val currentItem = state.mediaItems.getOrNull(index)
+        val path = currentItem?.saveUri
+            ?: state.metaItems.firstOrNull { it.label == "保存路径" }?.value.orEmpty()
+        viewModelScope.launch {
+            if (path.isBlank() || path == "尚未生成本地文件") {
+                _events.send(DetailUiEvent.ShowToast("本地文件还不可用"))
+            } else {
+                _events.send(DetailUiEvent.OpenFile(path, currentItem?.ext.toMimeType()))
+            }
+        }
+    }
+
     private fun observeTask() {
         viewModelScope.launch {
             container.repository.observeTasks().collect { tasks ->
                 currentTasks = tasks.filter { it.id == taskId || it.parseRecordId == taskId }
-                _uiState.value = currentTasks.toRedesignDetailUiState(taskId, _uiState.value.currentIndex)
+                visibleTasks = if (successOnly) {
+                    currentTasks.filter { it.status == DownloadTaskStatus.SUCCESS }.ifEmpty { currentTasks }
+                } else {
+                    currentTasks
+                }
+                _uiState.value = currentTasks.toRedesignDetailUiState(taskId, _uiState.value.currentIndex, successOnly)
             }
         }
     }
@@ -137,9 +151,10 @@ class DetailViewModel(
 class DetailViewModelFactory(
     private val container: AppContainer,
     private val taskId: String,
+    private val successOnly: Boolean = false,
 ) : ViewModelProvider.Factory {
     @Suppress("UNCHECKED_CAST")
     override fun <T : ViewModel> create(modelClass: Class<T>): T {
-        return DetailViewModel(container, taskId) as T
+        return DetailViewModel(container, taskId, successOnly) as T
     }
 }

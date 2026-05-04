@@ -438,6 +438,97 @@ class WebParserGatewayDouyinTest {
         assertEquals("https://pbs.twimg.com/media/HGyLEq4bwAA8yC5.jpg", parsed.coverUrl)
     }
 
+    @Test
+    fun parseFxTwitterApiResponse_returnsMultipleVideoFormats() {
+        val gateway = WebParserGateway()
+        val body = """
+            {
+              "code":200,
+              "message":"OK",
+              "tweet":{
+                "text":"多视频",
+                "media":{
+                  "all":[
+                    {
+                      "type":"video",
+                      "id":"1920367924050616321",
+                      "url":"https://video.twimg.com/ext_tw_video/1920367924050616321/pu/vid/avc1/720x960/a.mp4?tag=12",
+                      "thumbnail_url":"https://pbs.twimg.com/ext_tw_video_thumb/1920367924050616321/pu/img/a.jpg",
+                      "width":720,
+                      "height":960
+                    },
+                    {
+                      "type":"video",
+                      "id":"1920367960079605760",
+                      "url":"https://video.twimg.com/ext_tw_video/1920367960079605760/pu/vid/avc1/720x1280/b.mp4?tag=12",
+                      "thumbnail_url":"https://pbs.twimg.com/ext_tw_video_thumb/1920367960079605760/pu/img/b.jpg",
+                      "width":720,
+                      "height":1280
+                    },
+                    {
+                      "type":"video",
+                      "id":"1920367989414572032",
+                      "url":"https://video.twimg.com/ext_tw_video/1920367989414572032/pu/vid/avc1/720x1280/c.mp4?tag=12",
+                      "thumbnail_url":"https://pbs.twimg.com/ext_tw_video_thumb/1920367989414572032/pu/img/c.jpg",
+                      "width":720,
+                      "height":1280
+                    }
+                  ]
+                }
+              }
+            }
+        """.trimIndent()
+
+        val parsed = invokeParseFxTwitterApiResponse(gateway, body)
+
+        assertNotNull(parsed)
+        assertEquals(3, parsed!!.formats.size)
+        assertTrue(parsed.formats.all { it.ext == "mp4" })
+        assertEquals("https://pbs.twimg.com/ext_tw_video_thumb/1920367924050616321/pu/img/a.jpg", parsed.coverUrl)
+    }
+
+    @Test
+    fun parseFxTwitterApiResponse_returnsImageAndVideoFormats() {
+        val gateway = WebParserGateway()
+        val body = """
+            {
+              "code":200,
+              "message":"OK",
+              "tweet":{
+                "text":"图加视频",
+                "media":{
+                  "photos":[
+                    {
+                      "type":"photo",
+                      "id":"2051161572031221760",
+                      "url":"https://pbs.twimg.com/media/HHcwlQ3aUAAuRxz.jpg?name=orig",
+                      "width":644,
+                      "height":1024
+                    }
+                  ],
+                  "videos":[
+                    {
+                      "type":"video",
+                      "id":"2051161569141444608",
+                      "url":"https://video.twimg.com/ext_tw_video/2051161569141444608/pu/vid/avc1/1080x1920/a.mp4?tag=25",
+                      "thumbnail_url":"https://pbs.twimg.com/ext_tw_video_thumb/2051161569141444608/pu/img/a.jpg",
+                      "width":1080,
+                      "height":1920
+                    }
+                  ]
+                }
+              }
+            }
+        """.trimIndent()
+
+        val parsed = invokeParseFxTwitterApiResponse(gateway, body)
+
+        assertNotNull(parsed)
+        assertEquals(2, parsed!!.formats.size)
+        assertEquals("jpg", parsed.formats[0].ext)
+        assertEquals("mp4", parsed.formats[1].ext)
+    }
+
     private fun buildDouyinHtml(): String {
         val slash = "\\" + "u002F"
         val videoUrl = "https:${slash}${slash}www.iesdouyin.com${slash}aweme${slash}v1${slash}play${slash}?video_id=v0300abcxyz&ratio=1080p&line=0"

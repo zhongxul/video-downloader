@@ -8,7 +8,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -18,6 +17,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Text
+import androidx.compose.material3.Switch
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
@@ -31,6 +31,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.videodownloader.ui.redesign.component.AppBottomNav
+import com.example.videodownloader.ui.redesign.component.AppTopBar
 import com.example.videodownloader.ui.redesign.component.NavItem
 import com.example.videodownloader.ui.redesign.theme.AppDesignTheme
 import com.example.videodownloader.ui.redesign.theme.AppTheme
@@ -74,24 +75,21 @@ private fun ProfileContent(
 ) {
     val c = AppTheme.colors
     val t = AppTheme.typo
-    val s = AppTheme.spacing
     val r = AppTheme.radius
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(c.bgApp)
-            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 28.dp),
+            .background(c.bgApp),
     ) {
+        AppTopBar(title = "信息中心")
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
-            // Tag
-            Text(text = "个人中心", style = t.label, color = c.accent)
-
             // Profile card
             Column(
                 modifier = Modifier
@@ -142,10 +140,11 @@ private fun ProfileContent(
                     value = state.savePath,
                     onClick = { onAction(ProfileAction.OpenSavePath) },
                 )
-                SettingRow(
+                SettingSwitchRow(
                     title = "下载完成后通知",
                     value = if (state.notificationEnabled) "已开启" else "已关闭",
-                    onClick = { onAction(ProfileAction.ToggleNotification) },
+                    checked = state.notificationEnabled,
+                    onCheckedChange = { onAction(ProfileAction.ToggleNotification) },
                 )
                 SettingRow(
                     title = "X Cookie 设置",
@@ -156,8 +155,51 @@ private fun ProfileContent(
 
         }
 
-        Spacer(modifier = Modifier.height(s.md))
         AppBottomNav(selected = NavItem.PROFILE, onSelect = onNavSelect)
+    }
+}
+
+@Composable
+private fun SettingSwitchRow(
+    title: String,
+    value: String,
+    checked: Boolean,
+    onCheckedChange: (Boolean) -> Unit,
+) {
+    val c = AppTheme.colors
+    val t = AppTheme.typo
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(64.dp)
+            .clip(RoundedCornerShape(18.dp))
+            .background(c.surfaceTint)
+            .border(1.dp, c.borderSoft, RoundedCornerShape(18.dp))
+            .clickable { onCheckedChange(!checked) }
+            .padding(horizontal = 16.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        Column(
+            modifier = Modifier.weight(1f),
+            verticalArrangement = Arrangement.spacedBy(3.dp),
+        ) {
+            Text(
+                text = title,
+                style = t.body.copy(fontWeight = FontWeight.SemiBold),
+                color = c.textPrimary,
+            )
+            Text(
+                text = value,
+                style = t.caption,
+                color = c.textSecondary,
+                maxLines = 1,
+            )
+        }
+        Switch(
+            checked = checked,
+            onCheckedChange = onCheckedChange,
+        )
     }
 }
 

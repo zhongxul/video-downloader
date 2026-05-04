@@ -33,6 +33,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import com.example.videodownloader.R
 import com.example.videodownloader.ui.component.AppGradientBackdrop
 import com.example.videodownloader.ui.component.AppSectionCard
+import com.example.videodownloader.ui.redesign.component.AppTopBar
 
 @Composable
 fun XSettingsScreen(
@@ -64,22 +65,20 @@ fun XSettingsScreen(
     AppGradientBackdrop {
         Column(
             modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 16.dp, vertical = 10.dp),
+                .fillMaxSize(),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
+            AppTopBar(
+                title = stringResource(R.string.settings_title),
+                showBack = true,
+                onBack = onBack,
+            )
             SnackbarHost(hostState = snackbarHostState)
 
-            AppSectionCard {
+            AppSectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
+            ) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                        OutlinedButton(onClick = onBack) { Text(stringResource(R.string.common_back)) }
-                    }
-                    Text(
-                        text = stringResource(R.string.settings_title),
-                        style = MaterialTheme.typography.headlineSmall,
-                        fontWeight = FontWeight.Bold,
-                    )
                     Text(
                         text = stringResource(R.string.settings_subtitle),
                         style = MaterialTheme.typography.bodySmall,
@@ -91,7 +90,9 @@ fun XSettingsScreen(
                 }
             }
 
-            AppSectionCard {
+            AppSectionCard(
+                modifier = Modifier.padding(horizontal = 16.dp),
+            ) {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     OutlinedTextField(
                         value = state.cookieInput,

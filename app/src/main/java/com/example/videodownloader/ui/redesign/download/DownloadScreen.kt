@@ -7,7 +7,6 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -31,6 +30,7 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import com.example.videodownloader.ui.redesign.component.AppBottomNav
 import com.example.videodownloader.ui.redesign.component.AppPrimaryButton
+import com.example.videodownloader.ui.redesign.component.AppTopBar
 import com.example.videodownloader.ui.redesign.component.NavItem
 import com.example.videodownloader.ui.redesign.component.StatCard
 import com.example.videodownloader.ui.redesign.theme.AppDesignTheme
@@ -74,19 +74,19 @@ private fun DownloadContent(
 ) {
     val c = AppTheme.colors
     val t = AppTheme.typo
-    val s = AppTheme.spacing
     val r = AppTheme.radius
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(c.bgApp)
-            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 28.dp),
+            .background(c.bgApp),
     ) {
+        AppTopBar(title = "下载工作台")
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState()),
+                .verticalScroll(rememberScrollState())
+                .padding(horizontal = 20.dp, vertical = 12.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
             // Hero block
@@ -98,7 +98,6 @@ private fun DownloadContent(
                     .padding(20.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
-                Text(text = "下载工作台", style = t.captionSemiBold, color = c.accent)
                 Text(
                     text = "一键解析、确认资源、持续管理下载进度",
                     style = t.heroTitle,
@@ -167,7 +166,6 @@ private fun DownloadContent(
             }
         }
 
-        Spacer(modifier = Modifier.height(s.md))
         AppBottomNav(selected = NavItem.DOWNLOAD, onSelect = onNavSelect)
     }
 }

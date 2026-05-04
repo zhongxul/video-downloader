@@ -10,6 +10,7 @@ import com.example.videodownloader.di.AppContainer
 import com.example.videodownloader.di.ParseResultPayload
 import com.example.videodownloader.domain.model.ParseRecord
 import com.example.videodownloader.domain.model.ParseRecordStatus
+import com.example.videodownloader.domain.usecase.rankDisplayableFormats
 import com.example.videodownloader.ui.redesign.buildQueueSummary
 import com.example.videodownloader.ui.redesign.buildRecentParseInfo
 import kotlinx.coroutines.flow.combine
@@ -81,7 +82,8 @@ class DownloadViewModel(
             _uiState.update { it.copy(isParsing = true, parseError = null) }
             runCatching {
                 val resolvedUrl = container.parseLinkUseCase.resolveUrl(rawInput)
-                val info = container.parseLinkUseCase(rawInput)
+                val ranked = rankDisplayableFormats(container.parseLinkUseCase(rawInput))
+                val info = ranked.info
                 val recordId = saveParseRecord(
                     rawInput = rawInput,
                     resolvedUrl = resolvedUrl,
@@ -94,7 +96,7 @@ class DownloadViewModel(
                     parsedInfo = info,
                     sourceUrl = resolvedUrl,
                     parseRecordId = recordId,
-                    recommendedFormatId = null,
+                    recommendedFormatId = ranked.recommendedFormatId,
                 )
             }.onSuccess { payload ->
                 container.parseResultStore.save(payload)

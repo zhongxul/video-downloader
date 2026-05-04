@@ -19,6 +19,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -30,9 +31,12 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
+import com.example.videodownloader.R
 import com.example.videodownloader.ui.redesign.component.AppBottomNav
+import com.example.videodownloader.ui.redesign.component.AppTopBar
 import com.example.videodownloader.ui.redesign.component.MediaPreview
 import com.example.videodownloader.ui.redesign.component.NavItem
 import com.example.videodownloader.ui.redesign.theme.AppDesignTheme
@@ -44,14 +48,14 @@ fun LibraryScreen(
     viewModel: LibraryViewModel,
     onNavigateToDownload: () -> Unit,
     onNavigateToProfile: () -> Unit,
-    onNavigateToDetail: (String) -> Unit,
+    onNavigateToDetail: (String, Boolean) -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
     LaunchedEffect(viewModel) {
         viewModel.events.collect { event ->
             when (event) {
-                is LibraryUiEvent.NavigateToDetail -> onNavigateToDetail(event.taskId)
+                is LibraryUiEvent.NavigateToDetail -> onNavigateToDetail(event.taskId, event.successOnly)
                 is LibraryUiEvent.NavigateToParseResult -> Toast.makeText(context, "历史解析结果需要重新解析后确认", Toast.LENGTH_SHORT).show()
                 is LibraryUiEvent.ShowToast -> Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
             }
@@ -67,7 +71,7 @@ fun LibraryScreen(
                 else -> {}
             }
         },
-        onOpenDetail = { viewModel.onAction(LibraryAction.OpenDetail(it)) },
+        onOpenDetail = { taskId, successOnly -> viewModel.onAction(LibraryAction.OpenDetail(taskId, successOnly)) },
     )
 }
 
@@ -77,60 +81,63 @@ private fun LibraryContent(
     state: LibraryUiState,
     onAction: (LibraryAction) -> Unit,
     onNavSelect: (NavItem) -> Unit,
-    onOpenDetail: (String) -> Unit,
+    onOpenDetail: (String, Boolean) -> Unit,
 ) {
     val c = AppTheme.colors
-    val t = AppTheme.typo
     val s = AppTheme.spacing
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(c.bgApp)
-            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 28.dp),
+            .background(c.bgApp),
     ) {
         Column(
             modifier = Modifier
-                .weight(1f)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(s.md),
+                .fillMaxSize(),
         ) {
-            // Header
-            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                Text(text = "资源库", style = t.captionSemiBold, color = c.accent)
-                Text(
-                    text = "下载进度、已完成内容与解析记录统一管理",
-                    style = t.heroTitle,
-                    color = c.textPrimary,
-                )
+            AppTopBar(title = "资源库")
+            Column(
+                modifier = Modifier
+                    .weight(1f)
+                    .verticalScroll(rememberScrollState())
+                    .padding(start = 20.dp, end = 20.dp, top = 12.dp, bottom = 150.dp),
+                verticalArrangement = Arrangement.spacedBy(s.md),
+            ) {
+                // Tab content
+                when (state.currentTab) {
+                    LibraryTab.IN_PROGRESS -> InProgressTab(
+                        state = state,
+                        onAction = onAction,
+                        onOpenDetail = onOpenDetail,
+                    )
+                    LibraryTab.COMPLETED -> CompletedTab(
+                        state = state,
+                        onAction = onAction,
+                        onOpenDetail = onOpenDetail,
+                    )
+                    LibraryTab.PARSE_RECORDS -> ParseRecordsTab(
+                        state = state,
+                        onAction = onAction,
+                    )
+                }
             }
+        }
 
-            // Segment row
+        Column(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth(),
+        ) {
             SegmentRow(
                 currentTab = state.currentTab,
                 inProgressCount = state.inProgressCount,
                 completedCount = state.completedCount,
                 parseRecordCount = state.parseRecordCount,
                 onSwitch = { onAction(LibraryAction.SwitchTab(it)) },
+                modifier = Modifier.padding(horizontal = 20.dp, vertical = 10.dp),
             )
-
-            // Tab content
-            when (state.currentTab) {
-                LibraryTab.IN_PROGRESS -> InProgressTab(state.inProgressItems, onOpenDetail)
-                LibraryTab.COMPLETED -> CompletedTab(
-                    state = state,
-                    onAction = onAction,
-                    onOpenDetail = onOpenDetail,
-                )
-                LibraryTab.PARSE_RECORDS -> ParseRecordsTab(
-                    state = state,
-                    onAction = onAction,
-                )
-            }
+            AppBottomNav(selected = NavItem.LIBRARY, onSelect = onNavSelect)
         }
-
-        Spacer(modifier = Modifier.height(s.md))
-        AppBottomNav(selected = NavItem.LIBRARY, onSelect = onNavSelect)
     }
 }
 
@@ -141,13 +148,14 @@ private fun SegmentRow(
     completedCount: Int,
     parseRecordCount: Int,
     onSwitch: (LibraryTab) -> Unit,
+    modifier: Modifier = Modifier,
 ) {
     val c = AppTheme.colors
     val t = AppTheme.typo
     val r = AppTheme.radius
 
     Row(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.spacedBy(10.dp),
     ) {
         data class Seg(val tab: LibraryTab, val label: String)
@@ -184,18 +192,45 @@ private fun SegmentRow(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun InProgressTab(items: List<InProgressGroup>, onOpenDetail: (String) -> Unit) {
-    if (items.isEmpty()) {
+private fun InProgressTab(
+    state: LibraryUiState,
+    onAction: (LibraryAction) -> Unit,
+    onOpenDetail: (String, Boolean) -> Unit,
+) {
+    if (state.inProgressItems.isEmpty()) {
         EmptyState("暂无下载任务")
     } else {
-        items.forEach { group ->
-            InProgressCard(group = group, onClick = { onOpenDetail(group.id) })
+        if (state.inProgressManageMode) {
+            ManageBar(
+                selectedCount = state.selectedInProgressIds.size,
+                allSelected = state.inProgressItems.isNotEmpty() && state.inProgressItems.all { it.id in state.selectedInProgressIds },
+                onSelectAll = { onAction(LibraryAction.ToggleSelectAllInProgress) },
+                onDelete = { onAction(LibraryAction.DeleteSelectedInProgress) },
+                onCancel = { onAction(LibraryAction.ExitManageMode) },
+            )
+        }
+        state.inProgressItems.forEach { group ->
+            InProgressCard(
+                group = group,
+                selected = group.id in state.selectedInProgressIds,
+                onClick = {
+                    if (state.inProgressManageMode) onAction(LibraryAction.ToggleInProgressSelection(group.id))
+                    else onOpenDetail(group.id, false)
+                },
+                onLongClick = { onAction(LibraryAction.EnterInProgressManage(group.id)) },
+            )
         }
     }
 }
 
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun InProgressCard(group: InProgressGroup, onClick: () -> Unit) {
+private fun InProgressCard(
+    group: InProgressGroup,
+    selected: Boolean,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+) {
     val c = AppTheme.colors
     val t = AppTheme.typo
     val r = AppTheme.radius
@@ -204,8 +239,8 @@ private fun InProgressCard(group: InProgressGroup, onClick: () -> Unit) {
         modifier = Modifier
             .fillMaxWidth()
             .clip(RoundedCornerShape(r.xl))
-            .background(c.bgCard)
-            .clickable(onClick = onClick)
+            .background(if (selected) c.surfaceTint else c.bgCard)
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp),
     ) {
@@ -232,13 +267,8 @@ private fun InProgressCard(group: InProgressGroup, onClick: () -> Unit) {
 private fun CompletedTab(
     state: LibraryUiState,
     onAction: (LibraryAction) -> Unit,
-    onOpenDetail: (String) -> Unit,
+    onOpenDetail: (String, Boolean) -> Unit,
 ) {
-    val c = AppTheme.colors
-    val t = AppTheme.typo
-
-    Text(text = "已完成预览", style = t.captionSemiBold, color = c.textSecondary)
-
     if (state.completedItems.isEmpty()) {
         EmptyState("暂无已完成内容")
         return
@@ -270,7 +300,7 @@ private fun CompletedTab(
                         modifier = Modifier.weight(1f),
                         onClick = {
                             if (state.completedManageMode) onAction(LibraryAction.ToggleCompletedSelection(item.id))
-                            else onOpenDetail(item.id)
+                            else onOpenDetail(item.id, true)
                         },
                         onLongClick = { onAction(LibraryAction.EnterCompletedManage(item.id)) },
                     )
@@ -293,22 +323,19 @@ private fun CompletedCard(
     onLongClick: () -> Unit,
 ) {
     val c = AppTheme.colors
-    val t = AppTheme.typo
     val r = AppTheme.radius
 
-    Column(
+    Box(
         modifier = modifier
             .clip(RoundedCornerShape(r.xl))
             .background(if (selected) c.surfaceTint else c.bgCard)
-            .combinedClickable(onClick = onClick, onLongClick = onLongClick)
-            .padding(start = 10.dp, end = 10.dp, top = 10.dp, bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
+            .combinedClickable(onClick = onClick, onLongClick = onLongClick),
     ) {
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(156.dp)
-                .clip(RoundedCornerShape(16.dp))
+                .height(180.dp)
+                .clip(RoundedCornerShape(r.xl))
                 .background(Color(0xFF9ED0E9)),
         ) {
             MediaPreview(
@@ -318,13 +345,18 @@ private fun CompletedCard(
                 inlinePlaybackEnabled = false,
                 modifier = Modifier.fillMaxSize(),
             )
+            if (item.itemCount > 1) {
+                Icon(
+                    painter = painterResource(R.drawable.ic_collection_stack),
+                    contentDescription = "合集",
+                    tint = Color.Unspecified,
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .padding(8.dp)
+                        .height(26.dp),
+                )
+            }
         }
-        Text(
-            text = if (item.itemCount > 1) "${item.title} (${item.itemCount})" else item.title,
-            style = t.captionSemiBold,
-            color = c.textPrimary,
-            maxLines = 2,
-        )
     }
 }
 
@@ -442,7 +474,7 @@ private fun LibraryScreenPreview() {
             ),
             onAction = {},
             onNavSelect = {},
-            onOpenDetail = {},
+            onOpenDetail = { _, _ -> },
         )
     }
 }

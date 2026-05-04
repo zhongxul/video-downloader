@@ -8,6 +8,7 @@ import com.example.videodownloader.domain.model.ParseRecordStatus
 import com.example.videodownloader.domain.model.ParsedVideoInfo
 import com.example.videodownloader.domain.model.VideoFormat
 import com.example.videodownloader.ui.redesign.detail.TaskStatus
+import com.example.videodownloader.ui.redesign.detail.actionBar
 import com.example.videodownloader.ui.redesign.library.LibraryTab
 import org.junit.Assert.assertEquals
 import org.junit.Test
@@ -81,6 +82,41 @@ class RedesignUiMappersTest {
     }
 
     @Test
+    fun failedDetailActionBarUsesSingleRetryButton() {
+        val actionBar = task(
+            id = "task-1",
+            status = DownloadTaskStatus.FAILED,
+        ).toRedesignDetailUiState().actionBar()
+
+        assertEquals(null, actionBar.secondaryText)
+        assertEquals("重新下载", actionBar.primaryText)
+    }
+
+    @Test
+    fun completedDetailStateProvidesSourceTitleForTopBar() {
+        val state = task(
+            id = "task-1",
+            status = DownloadTaskStatus.SUCCESS,
+            sourceUrl = "https://x.com/i/status/123",
+        ).toRedesignDetailUiState()
+
+        assertEquals("X视频", state.sourceTitle)
+    }
+
+    @Test
+    fun completedDetailStateIgnoresFailedTasksInSameParseRecord() {
+        val state = listOf(
+            task("success", DownloadTaskStatus.SUCCESS, parseRecordId = "record-a", progress = 100),
+            task("failed", DownloadTaskStatus.FAILED, parseRecordId = "record-a", progress = 20, errorMessage = "文件不存在"),
+        ).toRedesignDetailUiState(groupId = "record-a", currentIndex = 0, successOnly = true)
+
+        assertEquals(TaskStatus.COMPLETED, state.status)
+        assertEquals(1, state.mediaItems.size)
+        assertEquals("success", state.mediaItems.single().taskId)
+        assertEquals("暂无异常", state.metaItems.first { it.label == "异常提示" }.value)
+    }
+
+    @Test
     fun completedItemsAreGroupedByParseRecord() {
         val tasks = listOf(
             task("img-1", DownloadTaskStatus.SUCCESS, parseRecordId = "record-gallery", progress = 100),
@@ -108,10 +144,11 @@ class RedesignUiMappersTest {
         progress: Int = 0,
         errorMessage: String? = null,
         saveUri: String? = null,
+        sourceUrl: String = "https://example.com/post",
     ) = DownloadTask(
         id = id,
         parseRecordId = parseRecordId,
-        sourceUrl = "https://example.com/post",
+        sourceUrl = sourceUrl,
         downloadUrl = "https://example.com/file.mp4",
         title = "图集标题",
         coverUrl = "https://example.com/cover.jpg",

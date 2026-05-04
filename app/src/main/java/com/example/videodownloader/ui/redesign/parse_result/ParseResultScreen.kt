@@ -1,6 +1,7 @@
 package com.example.videodownloader.ui.redesign.parse_result
 
 import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -13,17 +14,21 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -31,9 +36,17 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
-import com.example.videodownloader.ui.redesign.component.AppChip
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import com.example.videodownloader.R
+import com.example.videodownloader.ui.redesign.component.AppTopBar
 import com.example.videodownloader.ui.redesign.component.MediaPreview
 import com.example.videodownloader.ui.redesign.theme.AppDesignTheme
 import com.example.videodownloader.ui.redesign.theme.AppTheme
@@ -69,52 +82,45 @@ private fun ParseResultContent(
 ) {
     val c = AppTheme.colors
     val t = AppTheme.typo
-    val s = AppTheme.spacing
     val r = AppTheme.radius
+    var viewerResource by remember { mutableStateOf<ResourceItem?>(null) }
 
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(c.bgApp)
-            .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 28.dp),
+            .background(c.bgApp),
     ) {
+        AppTopBar(
+            title = state.sourceTag.ifEmpty { "媒体视频" },
+            showBack = true,
+            onBack = { onAction(ParseResultAction.GoBack) },
+        )
         Column(
             modifier = Modifier
                 .weight(1f)
-                .verticalScroll(rememberScrollState()),
-            verticalArrangement = Arrangement.spacedBy(s.md),
+                .padding(horizontal = 20.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            // Header row
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-            ) {
-                AppChip(
-                    text = "返回",
-                    onClick = { onAction(ParseResultAction.GoBack) },
-                )
-                AppChip(
-                    text = state.sourceTag.ifEmpty { "抖音图集" },
-                    backgroundColor = Color(0xFFEAF7F5),
-                    textColor = c.accent,
-                )
-            }
-
             // Preview card
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .weight(1f)
                     .clip(RoundedCornerShape(r.xl))
                     .background(c.bgCard)
+                    .verticalScroll(rememberScrollState())
                     .padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
-                Row(
+                Text(
+                    text = state.title,
+                    style = t.sectionTitle.copy(fontSize = 21.nonScaledSp),
+                    color = c.textPrimary,
+                )
+                Box(
                     modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically,
+                    contentAlignment = Alignment.Center,
                 ) {
-                    Text(text = "资源确认", style = t.pageTitle, color = c.textPrimary)
                     Box(
                         modifier = Modifier
                             .clip(RoundedCornerShape(r.pill))
@@ -136,28 +142,32 @@ private fun ParseResultContent(
                         .fillMaxWidth()
                         .height(320.dp)
                         .clip(RoundedCornerShape(r.lg))
-                        .background(Color(0xFFDDEAF4)),
+                        .background(Color.White),
                     contentAlignment = Alignment.Center,
                 ) {
                     val currentResource = state.resources.getOrNull(state.currentIndex)
-                    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Box(contentAlignment = Alignment.Center) {
                         MediaPreview(
                             source = currentResource?.previewUrl,
                             mediaSource = currentResource?.mediaUrl,
                             contentDescription = state.title,
                             isVideo = currentResource?.isVideo == true,
                             contentScale = ContentScale.Fit,
-                            placeholderColor = Color(0xFF8FC7E6),
+                            placeholderColor = Color.White,
                             modifier = Modifier
-                                .size(208.dp, 248.dp)
+                                .fillMaxSize()
                                 .clip(RoundedCornerShape(18.dp)),
                         )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = "当前预览 · 原始比例显示",
-                            style = t.caption,
-                            color = c.textSecondary,
-                        )
+                        if (currentResource?.isVideo == true) {
+                            Icon(
+                                painter = painterResource(R.drawable.ic_play_circle),
+                                contentDescription = "播放",
+                                tint = Color.Unspecified,
+                                modifier = Modifier
+                                    .size(52.dp)
+                                    .clickable { viewerResource = currentResource },
+                            )
+                        }
                     }
                 }
             }
@@ -184,58 +194,23 @@ private fun ParseResultContent(
                             mediaSource = resource.mediaUrl,
                             contentDescription = "资源 ${i + 1}",
                             isVideo = resource.isVideo,
+                            inlinePlaybackEnabled = false,
                             modifier = Modifier.fillMaxSize(),
                         )
                     }
                 }
             }
 
-            // Info card
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(r.xl))
-                    .background(c.bgCard)
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(
-                    text = state.title.ifEmpty { "校园跑偶遇平和善良、温柔大方的学妹 · 图集 6 张" },
-                    style = t.sectionTitle.copy(fontSize = 21.nonScaledSp),
-                    color = c.textPrimary,
-                )
-                Text(
-                    text = state.resourceMeta.ifEmpty { "原图下载 · WebP · 建议整组保存" },
-                    style = t.body,
-                    color = c.textSecondary,
-                )
-            }
-
-            // Version card
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(r.xl))
-                    .background(Color(0xFFEAF7F5))
-                    .padding(18.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text(text = "当前选择", style = t.captionSemiBold, color = c.accent)
-                Text(
-                    text = state.selectedVersion?.description
-                        ?: "图片 ${state.currentIndex + 1} · 原始尺寸 · 将按标题顺序命名保存",
-                    style = t.body,
-                    color = c.textPrimary,
-                )
-            }
         }
 
-        Spacer(modifier = Modifier.height(s.md))
+        Spacer(modifier = Modifier.height(12.dp))
 
         // Action bar
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(start = 20.dp, end = 20.dp, bottom = 12.dp)
                 .clip(RoundedCornerShape(r.xl))
                 .shadow(10.dp, RoundedCornerShape(r.xl))
                 .background(Color(0xFFFFFFFFF0.toInt()))
@@ -253,6 +228,13 @@ private fun ParseResultContent(
                 modifier = Modifier.weight(1f),
             )
         }
+    }
+
+    viewerResource?.let { resource ->
+        ParseResultVideoViewer(
+            resource = resource,
+            onClose = { viewerResource = null },
+        )
     }
 }
 
@@ -282,6 +264,62 @@ private fun WhiteButton(
 private val Int.nonScaledSp get() = androidx.compose.ui.unit.TextUnit(
     this.toFloat(), androidx.compose.ui.unit.TextUnitType.Sp
 )
+
+@Composable
+private fun ParseResultVideoViewer(
+    resource: ResourceItem,
+    onClose: () -> Unit,
+) {
+    BackHandler(onBack = onClose)
+    Box(
+        modifier = Modifier
+            .fillMaxSize()
+            .background(Color.Black),
+        contentAlignment = Alignment.Center,
+    ) {
+        val source = resource.mediaUrl
+        if (!source.isNullOrBlank()) {
+            val context = LocalContext.current
+            val player = remember(source) {
+                ExoPlayer.Builder(context).build().apply {
+                    val mediaItem = MediaItem.Builder()
+                        .setUri(source)
+                        .apply {
+                            if (source.contains(".m3u8", ignoreCase = true)) {
+                                setMimeType(MimeTypes.APPLICATION_M3U8)
+                            }
+                        }
+                        .build()
+                    setMediaItem(mediaItem)
+                    prepare()
+                    playWhenReady = true
+                }
+            }
+            androidx.compose.runtime.DisposableEffect(player) {
+                onDispose {
+                    runCatching {
+                        player.clearVideoSurface()
+                        player.stop()
+                        player.clearMediaItems()
+                    }
+                    player.release()
+                }
+            }
+            AndroidView(
+                modifier = Modifier.fillMaxSize(),
+                factory = { viewContext ->
+                    PlayerView(viewContext).apply {
+                        this.player = player
+                        useController = true
+                        resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                    }
+                },
+                update = { it.player = player },
+                onRelease = { it.player = null },
+            )
+        }
+    }
+}
 
 @Preview(showBackground = true, widthDp = 430, heightDp = 932)
 @Composable

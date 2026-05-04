@@ -1,12 +1,8 @@
 package com.example.videodownloader.ui.redesign.component
 
 import android.graphics.Bitmap
-import android.graphics.SurfaceTexture
-import android.media.MediaPlayer
 import android.media.MediaMetadataRetriever
 import android.net.Uri
-import android.view.Surface
-import android.view.TextureView
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
@@ -26,6 +22,11 @@ import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -37,6 +38,7 @@ fun MediaPreview(
     contentDescription: String?,
     isVideo: Boolean,
     inlinePlaybackEnabled: Boolean = true,
+    playTrigger: Int = 0,
     modifier: Modifier = Modifier,
     contentScale: ContentScale = ContentScale.Crop,
     placeholderColor: Color = Color(0xFFD9EAF5),
@@ -59,6 +61,10 @@ fun MediaPreview(
     val context = LocalContext.current
     var playInline by remember(source, mediaSource, inlinePlaybackEnabled) { mutableStateOf(false) }
     val playbackSource = mediaSource?.takeIf { it.isNotBlank() } ?: source
+    var imagePreviewFailed by remember(source) { mutableStateOf(false) }
+    if (inlinePlaybackEnabled && playTrigger > 0) {
+        playInline = true
+    }
 
     if (inlinePlaybackEnabled && playInline && !playbackSource.isNullOrBlank()) {
         InlineVideoPlayer(
@@ -66,7 +72,17 @@ fun MediaPreview(
             modifier = modifier
                 .clipToBounds()
                 .background(Color.Black),
-            onError = { playInline = false },
+        )
+        return
+    }
+
+    if (!imagePreviewFailed && isImagePreviewSource(source, playbackSource, mediaSource)) {
+        AsyncImage(
+            model = source,
+            contentDescription = contentDescription,
+            contentScale = contentScale,
+            modifier = modifier,
+            onError = { imagePreviewFailed = true },
         )
         return
     }
@@ -91,15 +107,10 @@ fun MediaPreview(
             bitmap = bitmap!!.asImageBitmap(),
             contentDescription = contentDescription,
             contentScale = contentScale,
-            modifier = if (inlinePlaybackEnabled) modifier.clickable { playInline = true } else modifier,
+            modifier = modifier,
         )
     } else {
-        val placeholderModifier = if (inlinePlaybackEnabled) {
-            modifier.background(placeholderColor).clickable { playInline = true }
-        } else {
-            modifier.background(placeholderColor)
-        }
-        Box(modifier = placeholderModifier)
+        Box(modifier = modifier.background(placeholderColor))
     }
 }
 
@@ -107,14 +118,31 @@ fun MediaPreview(
 private fun InlineVideoPlayer(
     source: String,
     modifier: Modifier = Modifier,
-    onError: () -> Unit,
 ) {
     val context = LocalContext.current
-    val player = remember(source) { MediaPlayer() }
+    val player = remember(source) {
+        ExoPlayer.Builder(context).build().apply {
+            val mediaItem = MediaItem.Builder()
+                .setUri(source)
+                .apply {
+                    if (source.contains(".m3u8", ignoreCase = true)) {
+                        setMimeType(MimeTypes.APPLICATION_M3U8)
+                    }
+                }
+                .build()
+            setMediaItem(mediaItem)
+            prepare()
+            playWhenReady = true
+        }
+    }
 
     DisposableEffect(source) {
         onDispose {
-            runCatching { player.stop() }
+            runCatching {
+                player.clearVideoSurface()
+                player.stop()
+                player.clearMediaItems()
+            }
             player.release()
         }
     }
@@ -122,45 +150,30 @@ private fun InlineVideoPlayer(
     AndroidView(
         modifier = modifier,
         factory = { viewContext ->
-            TextureView(viewContext).apply {
-                surfaceTextureListener = object : TextureView.SurfaceTextureListener {
-                    override fun onSurfaceTextureAvailable(surfaceTexture: SurfaceTexture, width: Int, height: Int) {
-                        val surface = Surface(surfaceTexture)
-                        runCatching {
-                            player.reset()
-                            if (source.startsWith("http://", ignoreCase = true) || source.startsWith("https://", ignoreCase = true)) {
-                                player.setDataSource(source)
-                            } else {
-                                player.setDataSource(context, Uri.parse(source))
-                            }
-                            player.setSurface(surface)
-                            player.isLooping = true
-                            player.setOnPreparedListener { it.start() }
-                            player.setOnErrorListener { _, _, _ ->
-                                surface.release()
-                                onError()
-                                true
-                            }
-                            player.prepareAsync()
-                        }.onFailure {
-                            surface.release()
-                            onError()
-                        }
-                    }
-
-                    override fun onSurfaceTextureSizeChanged(surfaceTexture: SurfaceTexture, width: Int, height: Int) = Unit
-
-                    override fun onSurfaceTextureDestroyed(surfaceTexture: SurfaceTexture): Boolean {
-                        runCatching {
-                            player.pause()
-                            player.setSurface(null)
-                        }
-                        return true
-                    }
-
-                    override fun onSurfaceTextureUpdated(surfaceTexture: SurfaceTexture) = Unit
-                }
+            PlayerView(viewContext).apply {
+                this.player = player
+                useController = false
+                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
             }
         },
+        update = { it.player = player },
+        onRelease = { view ->
+            view.player = null
+        },
     )
+}
+
+private fun isImagePreviewSource(source: String, playbackSource: String?, mediaSource: String?): Boolean {
+    if (!mediaSource.isNullOrBlank() && mediaSource != source) return true
+    if (playbackSource != source) return true
+
+    val path = runCatching { Uri.parse(source).lastPathSegment.orEmpty() }.getOrDefault(source)
+    val cleanPath = path.substringBefore('?').substringBefore('#').lowercase()
+    return cleanPath.endsWith(".jpg") ||
+        cleanPath.endsWith(".jpeg") ||
+        cleanPath.endsWith(".png") ||
+        cleanPath.endsWith(".webp") ||
+        cleanPath.endsWith(".gif") ||
+        cleanPath.endsWith(".bmp") ||
+        cleanPath.endsWith(".heic")
 }

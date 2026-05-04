@@ -6,12 +6,22 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.FileDownload
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.Person
+import androidx.compose.material.icons.filled.VideoLibrary
+import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Alignment
@@ -19,6 +29,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.unit.dp
 import com.example.videodownloader.ui.redesign.theme.AppTheme
 
@@ -29,6 +40,74 @@ enum class NavItem(val label: String) {
 }
 
 @Composable
+fun AppTopBar(
+    title: String? = null,
+    showBack: Boolean = false,
+    onBack: () -> Unit = {},
+    rightActionText: String? = null,
+    onRightAction: () -> Unit = {},
+    modifier: Modifier = Modifier,
+) {
+    val c = AppTheme.colors
+    val t = AppTheme.typo
+    val r = AppTheme.radius
+
+    Box(
+        modifier = modifier
+            .fillMaxWidth()
+            .background(c.bgApp)
+            .statusBarsPadding()
+            .height(64.dp)
+            .padding(horizontal = 20.dp),
+    ) {
+        if (showBack) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterStart)
+                    .size(48.dp)
+                    .clip(RoundedCornerShape(r.pill))
+                    .background(c.bgCard)
+                    .clickable(onClick = onBack),
+                contentAlignment = Alignment.Center,
+            ) {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.KeyboardArrowLeft,
+                    contentDescription = "返回",
+                    tint = c.textPrimary,
+                    modifier = Modifier.size(32.dp),
+                )
+            }
+        }
+
+        if (!title.isNullOrBlank()) {
+            Text(
+                text = title,
+                style = t.pageTitle,
+                color = c.textPrimary,
+                modifier = Modifier.align(Alignment.Center),
+                maxLines = 1,
+            )
+        }
+
+        if (!rightActionText.isNullOrBlank()) {
+            Box(
+                modifier = Modifier
+                    .align(Alignment.CenterEnd)
+                    .heightIn(min = 48.dp)
+                    .widthIn(min = 88.dp)
+                    .clip(RoundedCornerShape(r.pill))
+                    .background(c.bgCard)
+                    .clickable(onClick = onRightAction)
+                    .padding(horizontal = 14.dp, vertical = 12.dp),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(text = rightActionText, style = t.label, color = c.primary)
+            }
+        }
+    }
+}
+
+@Composable
 fun AppBottomNav(
     selected: NavItem,
     onSelect: (NavItem) -> Unit,
@@ -36,15 +115,12 @@ fun AppBottomNav(
 ) {
     val c = AppTheme.colors
     val t = AppTheme.typo
-    val r = AppTheme.radius
-
     Row(
         modifier = modifier
             .fillMaxWidth()
-            .shadow(10.dp, RoundedCornerShape(r.xl), clip = false)
-            .clip(RoundedCornerShape(r.xl))
-            .background(Color(0xE8FFFFFF))
-            .padding(horizontal = 16.dp, vertical = 18.dp),
+            .background(Color(0xF8FFFFFF))
+            .navigationBarsPadding()
+            .padding(horizontal = 22.dp, vertical = 8.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
@@ -57,11 +133,11 @@ fun AppBottomNav(
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(4.dp),
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(28.dp)
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(if (isActive) c.primary else c.surfaceTint),
+                Icon(
+                    imageVector = item.icon(),
+                    contentDescription = item.label,
+                    tint = if (isActive) c.primary else c.textSecondary,
+                    modifier = Modifier.size(30.dp),
                 )
                 Text(
                     text = item.label,
@@ -70,6 +146,14 @@ fun AppBottomNav(
                 )
             }
         }
+    }
+}
+
+private fun NavItem.icon(): ImageVector {
+    return when (this) {
+        NavItem.DOWNLOAD -> Icons.Default.FileDownload
+        NavItem.LIBRARY -> Icons.Default.VideoLibrary
+        NavItem.PROFILE -> Icons.Default.Person
     }
 }
 
