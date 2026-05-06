@@ -42,6 +42,7 @@ fun ProfileScreen(
     onNavigateToDownload: () -> Unit,
     onNavigateToLibrary: () -> Unit,
     onNavigateToXCookieSettings: () -> Unit,
+    onNavigateToDouyinCookieSettings: () -> Unit,
 ) {
     val state by viewModel.uiState.collectAsState()
     val context = LocalContext.current
@@ -51,6 +52,7 @@ fun ProfileScreen(
                 is ProfileUiEvent.ShowToast -> Toast.makeText(context, event.message, Toast.LENGTH_SHORT).show()
                 is ProfileUiEvent.OpenSystemSettings -> Unit
                 ProfileUiEvent.NavigateToXCookieSettings -> onNavigateToXCookieSettings()
+                ProfileUiEvent.NavigateToDouyinCookieSettings -> onNavigateToDouyinCookieSettings()
             }
         }
     }
@@ -150,6 +152,11 @@ private fun ProfileContent(
                     title = "X Cookie 设置",
                     value = "用于解析需要登录态的 X 内容",
                     onClick = { onAction(ProfileAction.OpenXCookieSettings) },
+                )
+                SettingRow(
+                    title = "抖音 Cookie 设置",
+                    value = "用于解析图文、实况图和动图内容",
+                    onClick = { onAction(ProfileAction.OpenDouyinCookieSettings) },
                 )
             }
 

@@ -40,6 +40,42 @@ class RedesignUiMappersTest {
     }
 
     @Test
+    fun parseResultPayloadUsesPerFormatThumbnailForVideoResources() {
+        val payload = ParseResultPayload(
+            parsedInfo = ParsedVideoInfo(
+                title = "动图标题",
+                coverUrl = "https://example.com/global-cover.webp",
+                formats = listOf(
+                    VideoFormat(
+                        formatId = "douyin_detail_0",
+                        resolution = "动图1",
+                        ext = "mp4",
+                        sizeText = null,
+                        downloadUrl = "https://example.com/1.mp4",
+                        thumbnailUrl = "https://example.com/cover-1.webp",
+                    ),
+                    VideoFormat(
+                        formatId = "douyin_detail_1",
+                        resolution = "动图2",
+                        ext = "mp4",
+                        sizeText = null,
+                        downloadUrl = "https://example.com/2.mp4",
+                        thumbnailUrl = "https://example.com/cover-2.webp",
+                    ),
+                ),
+            ),
+            sourceUrl = "https://v.douyin.com/abc",
+            parseRecordId = "record-1",
+            recommendedFormatId = null,
+        )
+
+        val state = payload.toRedesignParseResultUiState()
+
+        assertEquals("https://example.com/cover-1.webp", state.resources[0].thumbnailUrl)
+        assertEquals("https://example.com/cover-2.webp", state.resources[1].thumbnailUrl)
+    }
+
+    @Test
     fun libraryStateGroupsTasksAndRecords() {
         val tasks = listOf(
             task("queued", DownloadTaskStatus.QUEUED, parseRecordId = "record-a", progress = 0),

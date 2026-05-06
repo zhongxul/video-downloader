@@ -13,6 +13,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.videodownloader.di.AppContainer
 import com.example.videodownloader.di.ParseResultPayload
 import com.example.videodownloader.domain.model.VideoFormat
+import com.example.videodownloader.domain.usecase.planDownloadFormatsForSaving
 import com.example.videodownloader.ui.redesign.toRedesignParseResultUiState
 
 class ParseResultViewModel(
@@ -88,17 +89,20 @@ class ParseResultViewModel(
         viewModelScope.launch {
             var successCount = 0
             var failedCount = 0
-            val totalImageCount = currentPayload.parsedInfo.formats.count {
+            val plannedTargets = planDownloadFormatsForSaving(currentPayload.parsedInfo.title, targets)
+            val totalImageCount = plannedTargets.count {
+                it.format.downloadable && it.format.ext.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic")
+            }.takeIf { it > 0 } ?: currentPayload.parsedInfo.formats.count {
                 it.downloadable && it.ext.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic")
             }.takeIf { it > 0 }
 
-            targets.forEach { format ->
+            plannedTargets.forEach { planned ->
                 runCatching {
                     container.createDownloadTaskUseCase(
                         sourceUrl = currentPayload.sourceUrl,
-                        title = currentPayload.parsedInfo.title,
-                        coverUrl = currentPayload.parsedInfo.coverUrl,
-                        format = format,
+                        title = planned.title,
+                        coverUrl = planned.coverUrl ?: currentPayload.parsedInfo.coverUrl,
+                        format = planned.format,
                         parseRecordId = if (attachParseRecord) currentPayload.parseRecordId else null,
                         totalImageCount = totalImageCount,
                     )

@@ -1270,7 +1270,7 @@ class WebParserGateway(
             .map(::normalizeVideoUrl)
             .filter(::isLikelyImageDownloadUrl)
 
-        val candidates = if (downloadUrls.isNotEmpty()) downloadUrls else playUrls
+        val candidates = (downloadUrls + playUrls).distinct()
         if (candidates.isEmpty()) return null
         return candidates.maxByOrNull(::scoreDouyinImageUrl)
     }

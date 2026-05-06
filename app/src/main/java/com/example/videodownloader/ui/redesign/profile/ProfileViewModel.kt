@@ -44,6 +44,11 @@ class ProfileViewModel(
                     _events.send(ProfileUiEvent.NavigateToXCookieSettings)
                 }
             }
+            ProfileAction.OpenDouyinCookieSettings -> {
+                viewModelScope.launch {
+                    _events.send(ProfileUiEvent.NavigateToDouyinCookieSettings)
+                }
+            }
             ProfileAction.OpenSupportedSites -> {
                 sendToast("当前支持抖音、X 以及直链媒体解析")
             }

@@ -171,6 +171,31 @@ class WebParserGatewayDouyinTest {
     }
 
     @Test
+    fun parseDouyinItem_prefersNonWatermarkedImageCandidate() {
+        val gateway = WebParserGateway()
+        val slash = "\\" + "u002F"
+        val raw = """
+            {
+              "aweme_type":2,
+              "desc":"图集无水印测试",
+              "images":[
+                {
+                  "download_url_list":["https:${slash}${slash}p3-sign.douyinpic.com${slash}tos-cn-i-0813c000-ce${slash}foo-water:abc.webp?sc=image&biz_tag=aweme_images"],
+                  "url_list":["https:${slash}${slash}p3-sign.douyinpic.com${slash}tos-cn-i-0813c000-ce${slash}foo.webp?sc=image&biz_tag=aweme_images"]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val parsed = invokeParseDouyinItem(gateway, JSONObject(raw))
+
+        assertNotNull(parsed)
+        assertEquals(1, parsed!!.formats.size)
+        assertTrue(parsed.formats.first().downloadUrl.contains("foo.webp?"))
+        assertFalse(parsed.formats.first().downloadUrl.contains("-water:"))
+    }
+
+    @Test
     fun normalizeVideoUrl_keepsSignedDouyinImageQueryEncoded() {
         val gateway = WebParserGateway()
         val rawUrl = "https:\\/\\/p3-sign.douyinpic.com\\/tos-cn-i-0813c000-ce\\/foo.webp?x-signature=abc%2Bdef%2Fghi%3D&sig=Jm9v%2Bbar%3D&sc=image&biz_tag=aweme_images"

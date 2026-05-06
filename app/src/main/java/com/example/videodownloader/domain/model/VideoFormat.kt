@@ -9,4 +9,6 @@ data class VideoFormat(
     val durationSec: Double? = null,
     val fileSizeBytes: Long? = null,
     val downloadable: Boolean = true,
+    val thumbnailUrl: String? = null,
+    val pairedImageUrl: String? = null,
 )

@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.videodownloader.di.AppContainer
 import com.example.videodownloader.domain.model.ParsedVideoInfo
 import com.example.videodownloader.domain.model.VideoFormat
+import com.example.videodownloader.domain.usecase.planDownloadFormatsForSaving
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,6 +23,8 @@ data class ParseResultUiState(
     val isSubmitting: Boolean = false,
     val actionMessage: String? = null,
 )
+
+private val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic")
 
 class ParseResultViewModel(
     private val container: AppContainer,
@@ -76,14 +79,18 @@ class ParseResultViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true) }
             runCatching {
-                container.createDownloadTaskUseCase(
-                    sourceUrl = state.sourceUrl.orEmpty(),
-                    title = info.title,
-                    coverUrl = info.coverUrl,
-                    format = selected,
-                    parseRecordId = state.parseRecordId,
-                    totalImageCount = info.formats.count { it.downloadable && it.ext.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic") },
-                )
+                val planned = planDownloadFormatsForSaving(info.title, listOf(selected))
+                val totalImageCount = planned.count { it.format.ext.lowercase() in imageExts }.takeIf { it > 0 }
+                planned.forEach {
+                    container.createDownloadTaskUseCase(
+                        sourceUrl = state.sourceUrl.orEmpty(),
+                        title = it.title,
+                        coverUrl = it.coverUrl ?: info.coverUrl,
+                        format = it.format,
+                        parseRecordId = state.parseRecordId,
+                        totalImageCount = totalImageCount,
+                    )
+                }
             }.onSuccess {
                 _uiState.update { it.copy(isSubmitting = false, actionMessage = "已加入下载队列") }
             }.onFailure { throwable ->
@@ -108,15 +115,17 @@ class ParseResultViewModel(
             _uiState.update { it.copy(isSubmitting = true) }
             var successCount = 0
             var failedCount = 0
-            targets.forEach { format ->
+            val plannedTargets = planDownloadFormatsForSaving(info.title, targets)
+            val totalImageCount = plannedTargets.count { it.format.ext.lowercase() in imageExts }.takeIf { it > 0 }
+            plannedTargets.forEach { planned ->
                 runCatching {
                     container.createDownloadTaskUseCase(
                         sourceUrl = state.sourceUrl.orEmpty(),
-                        title = info.title,
-                        coverUrl = info.coverUrl,
-                        format = format,
+                        title = planned.title,
+                        coverUrl = planned.coverUrl ?: info.coverUrl,
+                        format = planned.format,
                         parseRecordId = null,
-                        totalImageCount = targets.count { it.ext.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic") },
+                        totalImageCount = totalImageCount,
                     )
                 }.onSuccess {
                     successCount += 1

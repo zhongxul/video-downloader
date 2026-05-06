@@ -21,6 +21,9 @@ import com.example.videodownloader.ui.redesign.profile.ProfileScreen
 import com.example.videodownloader.ui.redesign.profile.ProfileViewModel
 import com.example.videodownloader.ui.redesign.profile.ProfileViewModelFactory
 import com.example.videodownloader.ui.redesign.theme.AppDesignTheme
+import com.example.videodownloader.ui.screen.settings.DouyinSettingsScreen
+import com.example.videodownloader.ui.screen.settings.DouyinSettingsViewModel
+import com.example.videodownloader.ui.screen.settings.DouyinSettingsViewModelFactory
 import com.example.videodownloader.ui.screen.settings.XLoginWebViewScreen
 import com.example.videodownloader.ui.screen.settings.XSettingsScreen
 import com.example.videodownloader.ui.screen.settings.XSettingsViewModel
@@ -34,6 +37,8 @@ object AppRoutes {
     const val DETAIL = "detail/{taskId}?successOnly={successOnly}"
     const val X_SETTINGS = "x_settings"
     const val X_LOGIN = "x_login"
+    const val DOUYIN_SETTINGS = "douyin_settings"
+    const val DOUYIN_LOGIN = "douyin_login"
 
     fun parseResult(parseRecordId: String) = "parse_result/$parseRecordId"
     fun detail(taskId: String, successOnly: Boolean = false) = "detail/$taskId?successOnly=$successOnly"
@@ -108,6 +113,9 @@ fun RedesignNavHost(
                     onNavigateToXCookieSettings = {
                         navController.navigate(AppRoutes.X_SETTINGS)
                     },
+                    onNavigateToDouyinCookieSettings = {
+                        navController.navigate(AppRoutes.DOUYIN_SETTINGS)
+                    },
                 )
             }
 
@@ -163,6 +171,30 @@ fun RedesignNavHost(
                         vm.importCookieFromWeb(rawCookie)
                         navController.navigateUp()
                     },
+                )
+            }
+
+            composable(AppRoutes.DOUYIN_SETTINGS) {
+                val vm: DouyinSettingsViewModel = viewModel(factory = DouyinSettingsViewModelFactory(container))
+                DouyinSettingsScreen(
+                    viewModel = vm,
+                    onBack = { navController.navigateUp() },
+                    onOpenLoginWebView = { navController.navigate(AppRoutes.DOUYIN_LOGIN) },
+                )
+            }
+
+            composable(AppRoutes.DOUYIN_LOGIN) {
+                val vm: DouyinSettingsViewModel = viewModel(factory = DouyinSettingsViewModelFactory(container))
+                XLoginWebViewScreen(
+                    onBack = { navController.navigateUp() },
+                    onCookieCaptured = { rawCookie ->
+                        vm.importCookieFromWeb(rawCookie)
+                        navController.navigateUp()
+                    },
+                    title = "抖音登录",
+                    subtitle = "登录抖音后点右上角保存 Cookie，用于图文详情解析。",
+                    startUrl = "https://www.douyin.com/",
+                    cookieUrl = "https://www.douyin.com",
                 )
             }
         }

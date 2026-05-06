@@ -27,6 +27,10 @@ import com.example.videodownloader.ui.redesign.component.AppTopBar
 fun XLoginWebViewScreen(
     onBack: () -> Unit,
     onCookieCaptured: (String) -> Unit,
+    title: String = stringResource(R.string.x_login_title),
+    subtitle: String = stringResource(R.string.x_login_subtitle),
+    startUrl: String = "https://x.com/i/flow/login",
+    cookieUrl: String = "https://x.com",
 ) {
     val webViewHolder = remember { mutableStateOf<WebView?>(null) }
 
@@ -37,12 +41,12 @@ fun XLoginWebViewScreen(
             verticalArrangement = Arrangement.spacedBy(10.dp),
         ) {
             AppTopBar(
-                title = stringResource(R.string.x_login_title),
+                title = title,
                 showBack = true,
                 onBack = onBack,
                 rightActionText = stringResource(R.string.x_login_save_cookie),
                 onRightAction = {
-                    val cookie = CookieManager.getInstance().getCookie("https://x.com").orEmpty()
+                    val cookie = CookieManager.getInstance().getCookie(cookieUrl).orEmpty()
                     onCookieCaptured(cookie)
                 },
             )
@@ -51,7 +55,7 @@ fun XLoginWebViewScreen(
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
                     Text(
-                        text = stringResource(R.string.x_login_subtitle),
+                        text = subtitle,
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
@@ -79,7 +83,7 @@ fun XLoginWebViewScreen(
                             CookieManager.getInstance().setAcceptCookie(true)
                             CookieManager.getInstance().setAcceptThirdPartyCookies(this, true)
                             webViewClient = object : WebViewClient() {}
-                            loadUrl("https://x.com/i/flow/login")
+                            loadUrl(startUrl)
                             webViewHolder.value = this
                         }
                     },

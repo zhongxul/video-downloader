@@ -19,6 +19,7 @@ Thumbs.db
 *.keystore
 
 # Temporary files
+tmp/
 *.tmp
 *.swp
 tmp_*.png

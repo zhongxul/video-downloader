@@ -39,8 +39,8 @@ fun ParseResultPayload.toRedesignParseResultUiState(currentIndex: Int = 0): Pars
             val isVideo = format.ext.lowercase() in videoExts
             ResourceItem(
                 id = format.formatId,
-                thumbnailUrl = if (isImage) format.downloadUrl else parsedInfo.coverUrl ?: format.downloadUrl,
-                previewUrl = if (isImage) format.downloadUrl else parsedInfo.coverUrl ?: format.downloadUrl,
+                thumbnailUrl = if (isImage) format.downloadUrl else format.thumbnailUrl ?: parsedInfo.coverUrl ?: format.downloadUrl,
+                previewUrl = if (isImage) format.downloadUrl else format.thumbnailUrl ?: parsedInfo.coverUrl ?: format.downloadUrl,
                 mediaUrl = format.downloadUrl,
                 isVideo = isVideo && !isImage,
             )

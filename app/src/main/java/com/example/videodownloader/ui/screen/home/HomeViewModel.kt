@@ -11,6 +11,7 @@ import com.example.videodownloader.domain.model.ParseRecord
 import com.example.videodownloader.domain.model.ParseRecordStatus
 import com.example.videodownloader.domain.model.ParsedVideoInfo
 import com.example.videodownloader.domain.model.VideoFormat
+import com.example.videodownloader.domain.usecase.planDownloadFormatsForSaving
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
@@ -41,6 +42,8 @@ data class HomeUiState(
     val submitMessage: String? = null,
     val openResultToken: Long? = null,
 )
+
+private val imageExts = setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic")
 
 class HomeViewModel(
     private val container: AppContainer,
@@ -207,14 +210,18 @@ class HomeViewModel(
         viewModelScope.launch {
             _uiState.update { it.copy(isSubmitting = true, submitMessage = null) }
             runCatching {
-                container.createDownloadTaskUseCase(
-                    sourceUrl = sourceUrl,
-                    title = parsedInfo.title,
-                    coverUrl = parsedInfo.coverUrl,
-                    format = format,
-                    parseRecordId = current.parseRecordId,
-                    totalImageCount = parsedInfo.formats.count { it.downloadable && it.ext.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic") },
-                )
+                val planned = planDownloadFormatsForSaving(parsedInfo.title, listOf(format))
+                val totalImageCount = planned.count { it.format.ext.lowercase() in imageExts }.takeIf { it > 0 }
+                planned.forEach {
+                    container.createDownloadTaskUseCase(
+                        sourceUrl = sourceUrl,
+                        title = it.title,
+                        coverUrl = it.coverUrl ?: parsedInfo.coverUrl,
+                        format = it.format,
+                        parseRecordId = current.parseRecordId,
+                        totalImageCount = totalImageCount,
+                    )
+                }
             }.onSuccess {
                 _uiState.update {
                     it.copy(
@@ -248,15 +255,17 @@ class HomeViewModel(
             var successCount = 0
             var failedCount = 0
 
-            targets.forEach { format ->
+            val plannedTargets = planDownloadFormatsForSaving(parsedInfo.title, targets)
+            val totalImageCount = plannedTargets.count { it.format.ext.lowercase() in imageExts }.takeIf { it > 0 }
+            plannedTargets.forEach { planned ->
                 runCatching {
                     container.createDownloadTaskUseCase(
                         sourceUrl = sourceUrl,
-                        title = parsedInfo.title,
-                        coverUrl = parsedInfo.coverUrl,
-                        format = format,
+                        title = planned.title,
+                        coverUrl = planned.coverUrl ?: parsedInfo.coverUrl,
+                        format = planned.format,
                         parseRecordId = null,
-                        totalImageCount = targets.count { it.ext.lowercase() in setOf("jpg", "jpeg", "png", "webp", "gif", "bmp", "heic") },
+                        totalImageCount = totalImageCount,
                     )
                 }.onSuccess {
                     successCount++

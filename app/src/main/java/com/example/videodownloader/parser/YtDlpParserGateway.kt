@@ -18,14 +18,14 @@ class YtDlpParserGateway(
     context: Context,
     private val appText: AppText = DefaultAppText,
     private val xCookieProvider: (() -> String?)? = null,
-) {
+) : ParserGateway {
     private val appContext = context.applicationContext
 
     @Volatile
     private var initialized = false
 
-    suspend fun parse(url: String): ParsedVideoInfo? = withContext(Dispatchers.IO) {
-        if (!isXHost(url)) return@withContext null
+    override suspend fun parse(url: String): ParsedVideoInfo = withContext(Dispatchers.IO) {
+        if (!isXHost(url)) throw IllegalArgumentException(appText.parseNoDownloadableVideo())
         require(ensureInitialized()) { appText.parserInitFailed() }
 
         val cookie = xCookieProvider?.invoke()?.takeIf { it.isNotBlank() }
