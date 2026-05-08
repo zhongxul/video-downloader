@@ -2,6 +2,7 @@
 
 import android.app.DownloadManager
 import android.content.Context
+import android.content.SharedPreferences
 import android.media.MediaScannerConnection
 import android.net.Uri
 import android.os.Environment
@@ -24,6 +25,7 @@ import okhttp3.ConnectionPool
 import okhttp3.Dispatcher as OkHttpDispatcher
 import okhttp3.OkHttpClient
 import okhttp3.Request
+import org.json.JSONObject
 import javax.crypto.Cipher
 import javax.crypto.spec.IvParameterSpec
 import javax.crypto.spec.SecretKeySpec
@@ -56,6 +58,9 @@ class AndroidDownloadGateway(
         const val M3U8_SEGMENT_IO_BUFFER_SIZE = 64 * 1024
         const val M3U8_MAX_REQUESTS = 64
         const val M3U8_MAX_REQUESTS_PER_HOST = 16
+        const val INTERNAL_TASK_PREF_NAME = "video_downloader_internal_m3u8_tasks"
+        const val INTERNAL_TASK_IDS_KEY = "task_ids"
+        const val INTERNAL_TASK_KEY_PREFIX = "task_"
     }
 
     private val destinationFolder = "VideoDownloader"
@@ -86,6 +91,12 @@ class AndroidDownloadGateway(
     private val internalScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val internalTaskIdSeed = AtomicLong(-1L)
     private val internalM3u8Tasks = ConcurrentHashMap<Long, InternalM3u8Task>()
+    private val internalTaskPrefs: SharedPreferences =
+        context.getSharedPreferences(INTERNAL_TASK_PREF_NAME, Context.MODE_PRIVATE)
+
+    init {
+        restoreInternalM3u8Tasks()
+    }
 
     override suspend fun startDownload(
         url: String,
@@ -257,6 +268,7 @@ class AndroidDownloadGateway(
                 it.saveUri = null
                 it.errorMessage = appText.downloadCanceledByUser()
                 it.job = null
+                persistInternalTask(externalId, it)
             }
             return@withContext Unit
         }
@@ -296,22 +308,9 @@ class AndroidDownloadGateway(
             job = null,
         )
         internalM3u8Tasks[internalId] = state
+        persistInternalTask(internalId, state)
 
-        state.job = internalScope.launch {
-            runCatching {
-                downloadAndMergeM3u8(internalId, state.sourceUrl, state.absolutePath)
-            }.onFailure { throwable ->
-                if (throwable is CancellationException) return@onFailure
-                deleteFileQuietly(state.absolutePath)
-                updateInternalTask(
-                    internalId = internalId,
-                    newState = DownloadProgressState.FAILED,
-                    progress = state.progress ?: 0,
-                    saveUri = null,
-                    errorMessage = throwable.message ?: appText.m3u8DownloadFailed(),
-                )
-            }
-        }
+        launchInternalM3u8Task(internalId, state)
 
         return StartDownloadResult(
             externalId = internalId,
@@ -808,6 +807,73 @@ class AndroidDownloadGateway(
         if (newState == DownloadProgressState.SUCCESS || newState == DownloadProgressState.FAILED) {
             task.job = null
         }
+        persistInternalTask(internalId, task)
+    }
+
+    private fun launchInternalM3u8Task(internalId: Long, state: InternalM3u8Task) {
+        state.job = internalScope.launch {
+            runCatching {
+                downloadAndMergeM3u8(internalId, state.sourceUrl, state.absolutePath)
+            }.onFailure { throwable ->
+                if (throwable is CancellationException) return@onFailure
+                deleteFileQuietly(state.absolutePath)
+                updateInternalTask(
+                    internalId = internalId,
+                    newState = DownloadProgressState.FAILED,
+                    progress = state.progress ?: 0,
+                    saveUri = null,
+                    errorMessage = throwable.message ?: appText.m3u8DownloadFailed(),
+                )
+            }
+        }
+        persistInternalTask(internalId, state)
+    }
+
+    private fun restoreInternalM3u8Tasks() {
+        val ids = internalTaskPrefs.getStringSet(INTERNAL_TASK_IDS_KEY, emptySet()).orEmpty()
+        var lowestId = -1L
+        ids.mapNotNull { it.toLongOrNull() }.forEach { id ->
+            val json = internalTaskPrefs.getString(INTERNAL_TASK_KEY_PREFIX + id, null) ?: return@forEach
+            val task = runCatching {
+                val payload = JSONObject(json)
+                InternalM3u8Task(
+                    state = DownloadProgressState.valueOf(payload.getString("state")),
+                    progress = payload.optInt("progress").takeIf { payload.has("progress") },
+                    saveUri = payload.optString("saveUri").takeIf { it.isNotBlank() },
+                    errorMessage = payload.optString("errorMessage").takeIf { it.isNotBlank() },
+                    absolutePath = payload.getString("absolutePath"),
+                    sourceUrl = payload.getString("sourceUrl"),
+                    job = null,
+                )
+            }.getOrNull() ?: return@forEach
+
+            lowestId = minOf(lowestId, id)
+            internalM3u8Tasks[id] = task
+            if (task.state == DownloadProgressState.QUEUED || task.state == DownloadProgressState.DOWNLOADING) {
+                task.state = DownloadProgressState.QUEUED
+                task.progress = task.progress ?: 0
+                task.saveUri = "file://${task.absolutePath}"
+                task.errorMessage = null
+                launchInternalM3u8Task(id, task)
+            }
+        }
+        internalTaskIdSeed.set(lowestId - 1L)
+    }
+
+    private fun persistInternalTask(internalId: Long, task: InternalM3u8Task) {
+        val ids = internalTaskPrefs.getStringSet(INTERNAL_TASK_IDS_KEY, emptySet()).orEmpty().toMutableSet()
+        ids += internalId.toString()
+        val payload = JSONObject()
+            .put("state", task.state.name)
+            .put("absolutePath", task.absolutePath)
+            .put("sourceUrl", task.sourceUrl)
+        task.progress?.let { payload.put("progress", it) }
+        task.saveUri?.let { payload.put("saveUri", it) }
+        task.errorMessage?.let { payload.put("errorMessage", it) }
+        internalTaskPrefs.edit()
+            .putStringSet(INTERNAL_TASK_IDS_KEY, ids)
+            .putString(INTERNAL_TASK_KEY_PREFIX + internalId, payload.toString())
+            .apply()
     }
 
     private fun isLikelyM3u8Url(url: String): Boolean {

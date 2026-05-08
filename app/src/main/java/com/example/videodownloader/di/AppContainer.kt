@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.example.videodownloader.core.text.AndroidAppText
 import com.example.videodownloader.data.local.AppDatabase
+import com.example.videodownloader.data.local.AppDatabaseMigrations
 import com.example.videodownloader.data.local.AppSettingsStore
 import com.example.videodownloader.data.local.DouyinCookieStore
 import com.example.videodownloader.data.local.XCookieStore
@@ -12,9 +13,6 @@ import com.example.videodownloader.data.repository.DownloadTaskRepositoryImpl
 import com.example.videodownloader.data.repository.ParseRecordRepository
 import com.example.videodownloader.data.repository.ParseRecordRepositoryImpl
 import com.example.videodownloader.domain.usecase.CreateDownloadTaskUseCase
-import com.example.videodownloader.domain.usecase.ClearFinishedHistoryUseCase
-import com.example.videodownloader.domain.usecase.ObserveHistoryUseCase
-import com.example.videodownloader.domain.usecase.ObserveTaskDetailUseCase
 import com.example.videodownloader.domain.usecase.PauseDownloadTaskUseCase
 import com.example.videodownloader.domain.usecase.ParseLinkUseCase
 import com.example.videodownloader.domain.usecase.ResumeDownloadTaskUseCase
@@ -36,7 +34,12 @@ class AppContainer(context: Context) {
         appContext,
         AppDatabase::class.java,
         "video_downloader.db",
-    ).fallbackToDestructiveMigration().build()
+    )
+        .addMigrations(
+            AppDatabaseMigrations.MIGRATION_1_2,
+            AppDatabaseMigrations.MIGRATION_2_3,
+        )
+        .build()
 
     val repository: DownloadTaskRepository = DownloadTaskRepositoryImpl(db.downloadTaskDao())
     val parseRecordRepository: ParseRecordRepository = ParseRecordRepositoryImpl(db.parseRecordDao())
@@ -62,11 +65,8 @@ class AppContainer(context: Context) {
 
     val parseLinkUseCase = ParseLinkUseCase(parserGateway, appText)
     val createDownloadTaskUseCase = CreateDownloadTaskUseCase(repository, parseRecordRepository, downloadGateway, appText)
-    val observeHistoryUseCase = ObserveHistoryUseCase(repository)
-    val observeTaskDetailUseCase = ObserveTaskDetailUseCase(repository)
     val retryDownloadTaskUseCase = RetryDownloadTaskUseCase(repository, downloadGateway, appText)
     val syncDownloadStatusUseCase = SyncDownloadStatusUseCase(repository, parseRecordRepository, downloadGateway, appText)
     val pauseDownloadTaskUseCase = PauseDownloadTaskUseCase(repository, downloadGateway, appText)
     val resumeDownloadTaskUseCase = ResumeDownloadTaskUseCase(repository, downloadGateway, appText)
-    val clearFinishedHistoryUseCase = ClearFinishedHistoryUseCase(repository)
 }

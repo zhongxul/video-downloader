@@ -6,7 +6,7 @@ import androidx.room.RoomDatabase
 @Database(
     entities = [DownloadTaskEntity::class, ParseRecordEntity::class],
     version = 3,
-    exportSchema = false,
+    exportSchema = true,
 )
 abstract class AppDatabase : RoomDatabase() {
     abstract fun downloadTaskDao(): DownloadTaskDao

@@ -3,10 +3,10 @@ package com.example.videodownloader.data.local
 import android.content.Context
 
 class XCookieStore(context: Context) {
-    private val preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    private val preferences = EncryptedPreferenceStore(context, PREF_NAME)
 
     fun getCookie(): String? {
-        return preferences.getString(KEY_X_COOKIE, null)
+        return preferences.getString(KEY_X_COOKIE)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
     }
@@ -18,12 +18,12 @@ class XCookieStore(context: Context) {
             return ""
         }
 
-        preferences.edit().putString(KEY_X_COOKIE, normalized).apply()
+        preferences.putString(KEY_X_COOKIE, normalized)
         return normalized
     }
 
     fun clearCookie() {
-        preferences.edit().remove(KEY_X_COOKIE).apply()
+        preferences.remove(KEY_X_COOKIE)
     }
 
     private fun normalizeCookie(raw: String): String {

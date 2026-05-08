@@ -8,6 +8,7 @@ interface DownloadTaskRepository {
     suspend fun updateTask(task: DownloadTask)
     suspend fun getTask(taskId: String): DownloadTask?
     suspend fun getTasks(taskIds: List<String>): List<DownloadTask>
+    suspend fun getTasksByParseRecordId(parseRecordId: String): List<DownloadTask>
     suspend fun getActiveTasks(): List<DownloadTask>
     suspend fun deleteTasks(taskIds: List<String>)
     suspend fun clearFinishedTasks()

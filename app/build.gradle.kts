@@ -39,7 +39,14 @@ android {
     }
 
     buildFeatures {
+        buildConfig = true
         compose = true
+    }
+
+    kapt {
+        arguments {
+            arg("room.schemaLocation", "$projectDir/schemas")
+        }
     }
 
     composeOptions {

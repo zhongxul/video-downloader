@@ -43,7 +43,6 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil.compose.AsyncImage
 import com.example.videodownloader.R
-import com.example.videodownloader.ui.screen.history.MediaActionHelper
 import com.example.videodownloader.ui.redesign.component.MediaPreview
 import com.example.videodownloader.ui.redesign.component.AppPrimaryButton
 import com.example.videodownloader.ui.redesign.component.AppTopBar

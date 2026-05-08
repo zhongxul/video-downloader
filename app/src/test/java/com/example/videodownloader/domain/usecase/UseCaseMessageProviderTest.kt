@@ -89,10 +89,42 @@ class UseCaseMessageProviderTest {
         assertEquals("缺少系统下载编号", parseRepository.updatedRecords.last().message)
     }
 
+    @Test
+    fun `sync download status should aggregate parse record status across sibling tasks`() = runBlocking {
+        val queuedTask = baseTask().copy(id = "task-active", parseRecordId = "record-1", externalDownloadId = 1L)
+        val failedSibling = baseTask().copy(
+            id = "task-failed",
+            parseRecordId = "record-1",
+            status = DownloadTaskStatus.FAILED,
+            progress = 20,
+            errorMessage = "已有失败项",
+            externalDownloadId = 2L,
+        )
+        val parseRecord = baseRecord()
+        val repository = FakeDownloadTaskRepository(activeTasks = mutableListOf(queuedTask, failedSibling))
+        val parseRepository = FakeParseRecordRepository(records = mutableMapOf(parseRecord.id to parseRecord))
+        val useCase = SyncDownloadStatusUseCase(
+            repository = repository,
+            parseRecordRepository = parseRepository,
+            downloadGateway = FakeDownloadGateway(),
+            appText = fakeAppText(
+                downloadSuccess = "全部成功",
+                downloadFailed = "部分失败",
+            ),
+        )
+
+        useCase()
+
+        val updatedRecord = parseRepository.updatedRecords.last()
+        assertEquals(ParseRecordStatus.FAILED, updatedRecord.status)
+        assertEquals("已有失败项", updatedRecord.message)
+    }
+
     private fun fakeAppText(
         inputRequired: String = "请输入内容",
         nonDownloadableOption: String = "不可下载",
         missingSystemDownloadId: String = "缺少系统下载 ID",
+        downloadSuccess: String = "下载成功",
         downloadFailed: String = "下载失败",
     ): AppText {
         return object : AppText {
@@ -102,7 +134,7 @@ class UseCaseMessageProviderTest {
             override fun downloadQueued() = "已加入下载队列"
             override fun taskNotFound() = "任务不存在"
             override fun missingSystemDownloadId() = missingSystemDownloadId
-            override fun downloadSuccess() = "下载成功"
+            override fun downloadSuccess() = downloadSuccess
             override fun downloadFailed() = downloadFailed
             override fun downloadCanceled() = "下载已取消"
             override fun taskQueued() = "任务排队中"
@@ -209,7 +241,15 @@ private class FakeDownloadTaskRepository(
 
     override suspend fun getTasks(taskIds: List<String>): List<DownloadTask> = taskIds.mapNotNull(tasks::get)
 
-    override suspend fun getActiveTasks(): List<DownloadTask> = tasks.values.toList()
+    override suspend fun getTasksByParseRecordId(parseRecordId: String): List<DownloadTask> {
+        return tasks.values.filter { it.parseRecordId == parseRecordId }
+    }
+
+    override suspend fun getActiveTasks(): List<DownloadTask> {
+        return tasks.values.filter {
+            it.status == DownloadTaskStatus.QUEUED || it.status == DownloadTaskStatus.DOWNLOADING
+        }
+    }
 
     override suspend fun deleteTasks(taskIds: List<String>) {
         taskIds.forEach(tasks::remove)
@@ -248,14 +288,14 @@ private class FakeParseRecordRepository(
 
 private class FakeDownloadGateway : DownloadGateway {
     override suspend fun startDownload(url: String, fileName: String): StartDownloadResult {
-        return StartDownloadResult(externalId = 1L, saveUri = "file:///tmp/test.mp4", fileName = fileName)
+        return StartDownloadResult(externalId = 1L, saveUri = null, fileName = fileName)
     }
 
     override suspend fun queryDownloadProgress(externalId: Long): DownloadProgressSnapshot {
         return DownloadProgressSnapshot(
             state = DownloadProgressState.SUCCESS,
             progress = 100,
-            saveUri = "file:///tmp/test.mp4",
+            saveUri = null,
             errorMessage = null,
         )
     }

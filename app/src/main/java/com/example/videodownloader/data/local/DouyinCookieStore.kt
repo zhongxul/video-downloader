@@ -3,10 +3,10 @@ package com.example.videodownloader.data.local
 import android.content.Context
 
 class DouyinCookieStore(context: Context) {
-    private val preferences = context.getSharedPreferences(PREF_NAME, Context.MODE_PRIVATE)
+    private val preferences = EncryptedPreferenceStore(context, PREF_NAME)
 
     fun getCookie(): String? {
-        return preferences.getString(KEY_DOUYIN_COOKIE, null)
+        return preferences.getString(KEY_DOUYIN_COOKIE)
             ?.trim()
             ?.takeIf { it.isNotBlank() }
     }
@@ -17,12 +17,12 @@ class DouyinCookieStore(context: Context) {
             clearCookie()
             return ""
         }
-        preferences.edit().putString(KEY_DOUYIN_COOKIE, normalized).apply()
+        preferences.putString(KEY_DOUYIN_COOKIE, normalized)
         return normalized
     }
 
     fun clearCookie() {
-        preferences.edit().remove(KEY_DOUYIN_COOKIE).apply()
+        preferences.remove(KEY_DOUYIN_COOKIE)
     }
 
     private fun normalizeCookie(raw: String): String {

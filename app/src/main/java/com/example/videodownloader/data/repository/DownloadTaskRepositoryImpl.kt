@@ -27,6 +27,10 @@ class DownloadTaskRepositoryImpl(
         return dao.getByIds(taskIds).map { it.toDomain() }
     }
 
+    override suspend fun getTasksByParseRecordId(parseRecordId: String): List<DownloadTask> {
+        return dao.getByParseRecordId(parseRecordId).map { it.toDomain() }
+    }
+
     override suspend fun getActiveTasks(): List<DownloadTask> {
         return dao.getActiveTasks().map { it.toDomain() }
     }

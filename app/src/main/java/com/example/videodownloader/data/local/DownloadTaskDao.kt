@@ -27,6 +27,9 @@ interface DownloadTaskDao {
     @Query("SELECT * FROM download_tasks WHERE id IN (:taskIds)")
     suspend fun getByIds(taskIds: List<String>): List<DownloadTaskEntity>
 
+    @Query("SELECT * FROM download_tasks WHERE parseRecordId = :parseRecordId ORDER BY createdAt ASC")
+    suspend fun getByParseRecordId(parseRecordId: String): List<DownloadTaskEntity>
+
     @Query("DELETE FROM download_tasks WHERE id IN (:taskIds)")
     suspend fun deleteByIds(taskIds: List<String>)
 

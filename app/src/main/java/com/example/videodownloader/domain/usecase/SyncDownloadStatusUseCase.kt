@@ -95,31 +95,57 @@ class SyncDownloadStatusUseCase(
         errorMessage: String?,
         now: Long,
     ) {
-        repository.updateTask(
-            task.copy(
-                status = status,
-                progress = progress,
-                saveUri = saveUri,
-                errorMessage = errorMessage,
-                updatedAt = now,
-            ),
+        val updatedTask = task.copy(
+            status = status,
+            progress = progress,
+            saveUri = saveUri,
+            errorMessage = errorMessage,
+            updatedAt = now,
         )
+        repository.updateTask(updatedTask)
 
         val parseRecordId = task.parseRecordId ?: return
         val record = parseRecordRepository.getRecord(parseRecordId) ?: return
+        val siblingTasks = repository.getTasksByParseRecordId(parseRecordId)
+            .replaceWith(updatedTask)
+        val aggregate = siblingTasks.aggregateStatus()
         parseRecordRepository.updateRecord(
             record.copy(
-                status = status.toParseRecordStatus(),
-                message = when (status) {
-                    DownloadTaskStatus.SUCCESS -> appText.downloadSuccess()
-                    DownloadTaskStatus.FAILED -> errorMessage ?: appText.downloadFailed()
-                    DownloadTaskStatus.CANCELED -> appText.downloadCanceled()
-                    DownloadTaskStatus.QUEUED -> appText.taskQueued()
-                    DownloadTaskStatus.DOWNLOADING -> appText.downloading()
-                },
+                status = aggregate.status.toParseRecordStatus(),
+                message = aggregate.message,
                 updatedAt = now,
             ),
         )
+    }
+
+    private fun List<DownloadTask>.replaceWith(updatedTask: DownloadTask): List<DownloadTask> {
+        if (none { it.id == updatedTask.id }) return this + updatedTask
+        return map { if (it.id == updatedTask.id) updatedTask else it }
+    }
+
+    private fun List<DownloadTask>.aggregateStatus(): AggregateDownloadStatus {
+        if (isEmpty()) {
+            return AggregateDownloadStatus(DownloadTaskStatus.FAILED, appText.downloadFailed())
+        }
+        firstOrNull { it.status == DownloadTaskStatus.FAILED }?.let { failedTask ->
+            return AggregateDownloadStatus(
+                status = DownloadTaskStatus.FAILED,
+                message = failedTask.errorMessage ?: appText.downloadFailed(),
+            )
+        }
+        if (any { it.status == DownloadTaskStatus.DOWNLOADING }) {
+            return AggregateDownloadStatus(DownloadTaskStatus.DOWNLOADING, appText.downloading())
+        }
+        if (any { it.status == DownloadTaskStatus.QUEUED }) {
+            return AggregateDownloadStatus(DownloadTaskStatus.QUEUED, appText.taskQueued())
+        }
+        if (all { it.status == DownloadTaskStatus.SUCCESS }) {
+            return AggregateDownloadStatus(DownloadTaskStatus.SUCCESS, appText.downloadSuccess())
+        }
+        if (all { it.status == DownloadTaskStatus.CANCELED }) {
+            return AggregateDownloadStatus(DownloadTaskStatus.CANCELED, appText.downloadCanceled())
+        }
+        return AggregateDownloadStatus(DownloadTaskStatus.CANCELED, appText.downloadCanceled())
     }
 
     private fun validateDownloadedFile(saveUri: String?, expectedExt: String): String? {
@@ -277,4 +303,9 @@ class SyncDownloadStatusUseCase(
             DownloadTaskStatus.CANCELED -> ParseRecordStatus.CANCELED
         }
     }
+
+    private data class AggregateDownloadStatus(
+        val status: DownloadTaskStatus,
+        val message: String,
+    )
 }
